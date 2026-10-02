@@ -1017,11 +1017,12 @@
                 hidden: currentHidden,
                 full: currentFull,
                 updatedAt: new Date().toISOString()
-            }).then(() => {
-                showToast(adminTranslations[currentLang].toastSaved || '✅ Berhasil disimpan ke V2!', 'success');
+                      }).then(() => {
+                showToast((adminTranslations[currentLang] && adminTranslations[currentLang].toastSaved) || '✅ Berhasil disimpan ke V2!', 'success');
+                btn.disabled = false;
+                btn.textContent = origText;
             }).catch((err) => {
-                showToast('❌ Gagal: ' + err.message, 'error');
-            }).finally(() => {
+                showToast('❌ Gagal: ' + (err.message || err), 'error');
                 btn.disabled = false;
                 btn.textContent = origText;
             });
