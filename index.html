@@ -1285,7 +1285,7 @@
     <script>
         // ==================== KONFIGURASI WEB 2 ====================
         const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyDqmvM05WIth-Lsv0ocsGR8j3fKG1T36nwWr4JpoR4au3UpFpGwOR733KzQwsitMZhTw/exec';
-        const WA_ADMIN_NUMBER = '6285166235006';
+        const WA_ADMIN_NUMBER = '6285166235009';
 
         // ==================== FIREBASE REALTIME DATABASE ====================
         const firebaseConfig = {
@@ -1883,18 +1883,16 @@
             }).catch(err => console.error('Gagal kirim sheet:', err));
         }
 
-        function buildWhatsAppMessage() {
-            const sessionsStr = state.selectedSessions.map(s => `${s.time} ${s.type === 'daily' ? 'DAILY SCRIM' : 'NIGHT SCRIM'}`).join(', ');
-            return `Halo Admin Papih Gaming, saya mau konfirmasi registrasi scrim:
-
-📌 *KODE SCRIM:* ${state.transactionId}
-🛡️ *Nama Tim:* ${state.teamName}
-👤 *Nick Kapten:* ${state.captainNick}
-📱 *No WhatsApp:* ${state.whatsappNumber}
-⏰ *Sesi Dipilih:* ${sessionsStr}
-💰 *Total Bayar:* Rp ${state.totalPrice.toLocaleString('id-ID')}
-
-✅ Bukti transfer & logo tim sudah saya lampirkan melalui website. Mohon dicek. Terima kasih!`;
+                function buildWhatsAppMessage() {
+            const sessions = state.selectedSessions.map(s =>
+                `- ${s.time} ${s.type === 'daily' ? 'DAILY SCRIM' : 'NIGHT SCRIM'}`
+            ).join('\n');
+            return `Kode Scrim: ${state.transactionId}\n` +
+                `Nama Tim: ${state.teamName}\n` +
+                `Nick Kapten: ${state.captainNick}\n` +
+                `No WhatsApp: ${state.whatsappNumber}\n` +
+                `Sesi yang dipilih:\n${sessions}\n\n` +
+                `Total Pembayaran: Rp ${state.totalPrice.toLocaleString('id-ID')}`;
         }
 
         function openWhatsApp() {
