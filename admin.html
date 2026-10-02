@@ -864,7 +864,7 @@
             }
         });
 
-        function handleLogin(e) {
+                function handleLogin(e) {
             e.preventDefault();
             const email = document.getElementById('loginEmail').value.trim();
             const password = document.getElementById('loginPassword').value;
@@ -876,17 +876,23 @@
             btn.textContent = 'Memverifikasi...';
 
             auth.signInWithEmailAndPassword(email, password)
+                .then(() => {
+                    // Berhasil login - onAuthStateChanged akan langsung membuka dashboard
+                })
                 .catch((err) => {
+                    console.error('Firebase Auth Error:', err);
                     let msg = 'Gagal login. Periksa email dan password.';
                     if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
                         msg = 'Email atau password salah!';
+                    } else if (err.code === 'auth/unauthorized-domain') {
+                        msg = 'Domain GitHub belum didaftarkan di Firebase Authorized Domains!';
+                    } else if (err.message) {
+                        msg = err.message;
                     }
                     alertBox.textContent = msg;
                     alertBox.classList.add('show');
-                })
-                .finally(() => {
                     btn.disabled = false;
-                    btn.textContent = adminTranslations[currentLang].btnEnter || 'Masuk ke Panel';
+                    btn.textContent = (adminTranslations[currentLang] && adminTranslations[currentLang].btnEnter) || 'Masuk ke Panel';
                 });
         }
 
