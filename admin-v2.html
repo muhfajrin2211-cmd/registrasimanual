@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Papih Gaming Scrim V2</title>
+    <!-- Firebase SDK (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700;800&family=Segoe+UI:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* DARK THEME (PERSIS ADMIN WEB 1) */
+            --bg-primary: #080812;
+            --bg-secondary: #0f1026;
+            --bg-card: #151633;
+            --bg-card-hover: #1c1e42;
+            --accent: #ff334b;
+            --accent-glow: #ff5268;
+            --accent-blue: #3b82f6;
+            --gold: #fbbf24;
+            --gold-glow: rgba(251, 191, 36, 0.35);
+            --text-primary: #ffffff;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border-color: #23254d;
+            --border-highlight: #3b3f75;
+            --success: #10b981;
+            --error: #ef4444;
+            --radius-lg: 20px;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.7);
+            --glow: 0 0 25px rgba(255, 51, 75, 0.3);
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            --body-gradient:
+                radial-gradient(ellipse at 10% 15%, rgba(255, 51, 75, 0.12) 0%, transparent 45%),
+                radial-gradient(ellipse at 90% 85%, rgba(59, 130, 246, 0.1) 0%, transparent 45%),
+                radial-gradient(ellipse at 50% 50%, rgba(251, 191, 36, 0.04) 0%, transparent 60%);
+        }
+
+        [data-theme="light"] {
+            /* LIGHT THEME (GAYA BERSIH & RAPI) */
+            --bg-primary: #f0f3fa;
+            --bg-secondary: #ffffff;
+            --bg-card: #ffffff;
+            --bg-card-hover: #f8fafc;
+            --accent: #ff334b;
+            --accent-glow: #ff5268;
+            --accent-blue: #2563eb;
+            --gold: #d97706;
+            --gold-glow: rgba(217, 119, 6, 0.2);
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --border-color: #cbd5e1;
+            --border-highlight: #94a3b8;
+            --success: #16a34a;
+            --error: #dc2626;
+            --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            --glow: 0 0 25px rgba(255, 51, 75, 0.15);
+            --body-gradient:
+                radial-gradient(ellipse at 10% 15%, rgba(255, 51, 75, 0.06) 0%, transparent 45%),
+                radial-gradient(ellipse at 90% 85%, rgba(37, 99, 235, 0.06) 0%, transparent 45%),
+                radial-gradient(ellipse at 50% 50%, rgba(217, 119, 6, 0.02) 0%, transparent 60%);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            background-image: var(--body-gradient);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px 16px;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 960px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        /* TOP ACTION BAR (POJOK KANAN ATAS) */
+        .top-action-bar {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+            position: relative;
+            z-index: 100;
+        }
+
+        /* Language Globe Dropdown */
+        .lang-dropdown-wrapper { position: relative; }
+        .lang-globe-btn {
+            background: var(--bg-card);
+            border: 1.5px solid var(--border-color);
+            border-radius: 50px;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 6px 14px;
+            cursor: pointer;
+            transition: all var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .lang-globe-btn:hover { border-color: var(--accent); }
+        .lang-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: var(--bg-card);
+            border: 1.5px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+            padding: 6px;
+            min-width: 185px;
+            display: none;
+            flex-direction: column;
+            gap: 2px;
+            z-index: 1000;
+            backdrop-filter: blur(12px);
+        }
+        .lang-menu.show { display: flex; }
+        .lang-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .lang-item:hover { background: rgba(255, 51, 75, 0.12); color: var(--accent); }
+        .lang-item.active { background: var(--accent); color: #fff; font-weight: 700; }
+
+        /* Theme Toggle */
+        .theme-toggle-btn {
+            background: var(--bg-card);
+            border: 1.5px solid var(--border-color);
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .theme-toggle-btn:hover { border-color: var(--accent); transform: rotate(15deg); }
+
+        /* LOGO */
+        .panel-logo {
+            width: 82px;
+            height: 82px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid rgba(255, 51, 75, 0.8);
+            box-shadow: 0 0 25px rgba(255, 51, 75, 0.5), 0 0 50px rgba(251, 191, 36, 0.2);
+            margin: 0 auto 14px;
+            display: block;
+        }
+
+        /* LOGIN CARD (PERSIS WEB 1) */
+        .login-card {
+            max-width: 440px;
+            margin: 0 auto;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 36px 30px;
+            box-shadow: var(--shadow), var(--glow);
+            text-align: center;
+            backdrop-filter: blur(12px);
+            animation: fadeIn 0.4s ease;
+        }
+
+        .login-title {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--gold) 60%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .login-subtitle {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+        }
+
+        .input-group {
+            text-align: left;
+            margin-bottom: 18px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .admin-input {
+            width: 100%;
+            padding: 13px 16px;
+            background: var(--bg-secondary);
+            border: 1.5px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            outline: none;
+            transition: all var(--transition);
+            font-family: inherit;
+        }
+
+        .admin-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 15px rgba(255, 51, 75, 0.3);
+            background: rgba(255, 51, 75, 0.04);
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--accent) 0%, #d91c33 100%);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-md);
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.15rem;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all var(--transition);
+            box-shadow: 0 4px 20px rgba(255, 51, 75, 0.35);
+            margin-top: 10px;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(255, 51, 75, 0.55);
+            filter: brightness(1.1);
+        }
+
+        .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .alert-box {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            margin-bottom: 18px;
+            display: none;
+            text-align: left;
+        }
+        .alert-box.show { display: block; animation: shake 0.3s ease; }
+
+        /* DASHBOARD SECTION (PERSIS WEB 1) */
+        .dashboard-wrapper {
+            display: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 26px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+            animation: fadeIn 0.4s ease;
+        }
+
+        .dash-topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .dash-title-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .dash-mini-logo {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 2px solid var(--accent);
+            object-fit: cover;
+        }
+
+        .dash-title-group h1 {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .user-status {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .online-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        .dash-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn-action-ghost {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 9px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-action-ghost:hover { border-color: var(--text-primary); color: var(--text-primary); }
+
+        .btn-logout {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+            padding: 9px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all var(--transition);
+        }
+        .btn-logout:hover { background: var(--error); color: #fff; }
+
+        /* STATS BAR */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 14px 18px;
+            text-align: center;
+        }
+
+        .stat-card .val {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+
+        .stat-card .lbl {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-top: 2px;
+            font-weight: 700;
+        }
+
+        .stat-card.active-stat .val { color: var(--success); }
+        .stat-card.full-stat .val { color: var(--gold); }
+        .stat-card.hidden-stat .val { color: var(--error); }
+
+        /* SESSION GRID */
+        .sessions-list-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .session-ctrl-card {
+            background: var(--bg-secondary);
+            border: 1.5px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all var(--transition);
+        }
+
+        .session-ctrl-card:hover { border-color: var(--border-highlight); }
+
+        .session-ctrl-card.state-hidden {
+            opacity: 0.45;
+            background: rgba(239, 68, 68, 0.04);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .session-ctrl-card.state-full {
+            border-color: rgba(251, 191, 36, 0.4);
+            background: rgba(251, 191, 36, 0.05);
+        }
+
+        .session-time-num {
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+
+        .tag-pill {
+            font-size: 0.6rem;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 50px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .tag-pill.daily { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+        .tag-pill.night { background: rgba(251, 191, 36, 0.15); color: var(--gold); border: 1px solid rgba(251, 191, 36, 0.3); }
+
+        .toggles-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toggle-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+        .toggle-item.hide-opt { color: var(--error); }
+        .toggle-item.full-opt { color: var(--gold); }
+        .toggle-item.full-opt input { accent-color: var(--gold); }
+
+        /* SAVE BAR (PERSIS WEB 1) */
+        .save-bar {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 18px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            position: sticky;
+            bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+
+        .btn-save-database {
+            padding: 12px 28px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all var(--transition);
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-save-database:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(16, 185, 129, 0.6);
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 14px 22px;
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+            font-weight: 700;
+            z-index: 9999;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transform: translateY(-50px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+        }
+        .toast.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
+        .toast.success { background: #064e3b; border: 1px solid #10b981; color: #6ee7b7; }
+        .toast.error { background: #7f1d1d; border: 1px solid #ef4444; color: #fca5a5; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+
+        @media (max-width: 768px) {
+            .sessions-list-grid { grid-template-columns: 1fr; }
+            .stats-bar { grid-template-columns: repeat(2, 1fr); }
+            .dash-topbar { flex-direction: column; align-items: flex-start; }
+            .save-bar { flex-direction: column; gap: 12px; }
+            .btn-save-database { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="toast" class="toast"></div>
+
+    <div class="container">
+        <!-- TOP CONTROLS (POJOK KANAN ATAS) -->
+        <div class="top-action-bar">
+            <!-- Globe Language Dropdown -->
+            <div class="lang-dropdown-wrapper" id="langDropdownWrapper">
+                <button type="button" class="lang-globe-btn" id="langGlobeBtn" onclick="toggleLangDropdown()">
+                    <span>🌐</span> <span id="currentLangLabel">ID</span> <span style="font-size:0.6rem; opacity:0.7;">▼</span>
+                </button>
+                <div class="lang-menu" id="langMenu">
+                    <div class="lang-item active" data-lang="id" onclick="selectLang('id')">🇮🇩 Indonesia</div>
+                    <div class="lang-item" data-lang="en" onclick="selectLang('en')">🇬🇧 English</div>
+                    <div class="lang-item" data-lang="pt" onclick="selectLang('pt')">🇧🇷 Português</div>
+                    <div class="lang-item" data-lang="th" onclick="selectLang('th')">🇹🇭 ไทย (Thai)</div>
+                    <div class="lang-item" data-lang="vn" onclick="selectLang('vn')">🇻🇳 Tiếng Việt</div>
+                    <div class="lang-item" data-lang="es" onclick="selectLang('es')">🇪🇸 Español</div>
+                    <div class="lang-item" data-lang="ar" onclick="selectLang('ar')">🇸🇦 العربية</div>
+                </div>
+            </div>
+
+            <!-- Dark / Light Mode Toggle -->
+            <button type="button" class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Ganti Tema">
+                🌙
+            </button>
+        </div>
+
+        <!-- 1. LOGIN SECTION -->
+        <div class="login-card" id="loginSection">
+            <img src="logo.jpg" alt="Papih Gaming" class="panel-logo" />
+            <h1 class="login-title" data-i18n="adminTitle">PAPIH GAMING V2</h1>
+            <p class="login-subtitle" data-i18n="adminSub">Admin Panel Scrim Management V2</p>
+
+            <div class="alert-box" id="loginAlert"></div>
+
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="input-group">
+                    <label data-i18n="lblEmail">Email Admin</label>
+                    <input type="email" id="loginEmail" class="admin-input" placeholder="Masukkan email admin..." required autocomplete="username" />
+                </div>
+                <div class="input-group">
+                    <label data-i18n="lblPass">Password</label>
+                    <input type="password" id="loginPassword" class="admin-input" placeholder="Masukkan password..." required autocomplete="current-password" />
+                </div>
+                <button type="submit" class="btn-submit" id="btnLogin" data-i18n="btnEnter">Masuk ke Panel</button>
+            </form>
+
+            <div style="margin-top:20px;">
+                <a href="index-v2.html" class="btn-action-ghost" style="display:inline-flex;font-size:0.8rem;" data-i18n="btnBackWeb">
+                    ← Kembali ke Halaman Registrasi
+                </a>
+            </div>
+        </div>
+
+        <!-- 2. DASHBOARD SECTION -->
+        <div class="dashboard-wrapper" id="dashboardSection">
+            <div class="dash-topbar">
+                <div class="dash-title-group">
+                    <img src="logo.jpg" alt="Logo" class="dash-mini-logo" />
+                    <div>
+                        <h1 data-i18n="dashHeading">KELOLA SESI SCRIM V2</h1>
+                        <div class="user-status">
+                            <span class="online-dot"></span>
+                            <span id="userEmailDisplay">admin</span> • <span style="color:var(--success);font-weight:700;">Admin V2 Terverifikasi</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dash-actions">
+                    <a href="index-v2.html" target="_blank" class="btn-action-ghost" title="Buka website yang dilihat peserta">
+                        👁️ <span data-i18n="btnViewParticipant">Lihat Web Peserta</span>
+                    </a>
+                    <button class="btn-logout" onclick="handleLogout()" data-i18n="btnLogout">🚪 Keluar</button>
+                </div>
+            </div>
+
+            <!-- STATS BAR -->
+            <div class="stats-bar">
+                <div class="stat-card">
+                    <div class="val" id="statTotal">19</div>
+                    <div class="lbl" data-i18n="statTotal">Total Sesi</div>
+                </div>
+                <div class="stat-card active-stat">
+                    <div class="val" id="statActive">0</div>
+                    <div class="lbl" data-i18n="statOpen">Sesi Buka</div>
+                </div>
+                <div class="stat-card full-stat">
+                    <div class="val" id="statFull">0</div>
+                    <div class="lbl" data-i18n="statFull">Sesi Penuh (Full)</div>
+                </div>
+                <div class="stat-card hidden-stat">
+                    <div class="val" id="statHidden">0</div>
+                    <div class="lbl" data-i18n="statHidden">Disembunyikan</div>
+                </div>
+            </div>
+
+            <!-- BULK ACTIONS -->
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+                <span style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase;" data-i18n="lblControlList">
+                    Daftar Kontrol Sesi
+                </span>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-action-ghost" style="font-size:0.75rem; padding:6px 12px;" onclick="resetAllStates()" data-i18n="btnOpenAll">
+                        🔓 Buka Semua Sesi
+                    </button>
+                    <button class="btn-action-ghost" style="font-size:0.75rem; padding:6px 12px;" onclick="markAllFull()" data-i18n="btnMarkAllFull">
+                        🔒 Tandai Semua Full
+                    </button>
+                </div>
+            </div>
+
+            <!-- SESSION GRID -->
+            <div class="sessions-list-grid" id="sessionListGrid">
+                <!-- Di-generate otomatis oleh Javascript -->
+            </div>
+
+            <!-- SAVE BAR -->
+            <div class="save-bar">
+                <div>
+                    <span id="syncIndicator" style="font-size:0.88rem; color:var(--text-secondary);">⚡ Terkoneksi Realtime ke Firebase V2</span>
+                </div>
+                <button class="btn-save-database" id="btnSaveDb" onclick="saveToDatabase()" data-i18n="btnSaveDb">
+                    💾 Simpan Perubahan
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            authDomain: "registrasi-5d8e1.firebaseapp.com",
+            databaseURL: "https://registrasi-5d8e1-default-rtdb.asia-southeast1.firebasedatabase.app",
+            storageBucket: "registrasi-5d8e1.firebasestorage.app",
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const auth = firebase.auth();
+        const rtdb = firebase.database();
+        const RTDB_V2_PATH = 'scrim_sessions_v2';
+
+        const MASTER_SESSIONS = [
+            { time: "10.00", type: "daily", price: "5.000" },
+            { time: "11.00", type: "daily", price: "5.000" },
+            { time: "12.00", type: "daily", price: "5.000" },
+            { time: "13.00", type: "daily", price: "5.000" },
+            { time: "14.00", type: "daily", price: "5.000" },
+            { time: "15.00", type: "daily", price: "5.000" },
+            { time: "16.00", type: "daily", price: "5.000" },
+            { time: "17.00", type: "daily", price: "5.000" },
+            { time: "19.00", type: "daily", price: "5.000" },
+            { time: "19.00", type: "night", price: "10.000" },
+            { time: "20.00", type: "daily", price: "5.000" },
+            { time: "20.00", type: "night", price: "10.000" },
+            { time: "21.00", type: "daily", price: "5.000" },
+            { time: "21.00", type: "night", price: "10.000" },
+            { time: "22.00", type: "daily", price: "5.000" },
+            { time: "22.00", type: "night", price: "10.000" },
+            { time: "23.00", type: "daily", price: "5.000" },
+            { time: "00.00", type: "daily", price: "5.000" },
+            { time: "01.00", type: "daily", price: "5.000" }
+        ];
+
+        let currentHidden = [];
+        let currentFull = [];
+        let currentLang = 'id';
+
+        const adminTranslations = {
+            id: {
+                adminTitle: "PAPIH GAMING V2", adminSub: "Admin Panel Scrim Management V2",
+                lblEmail: "Email Admin", lblPass: "Password", btnEnter: "Masuk ke Panel", btnBackWeb: "← Kembali ke Halaman Registrasi",
+                dashHeading: "KELOLA SESI SCRIM V2", btnViewParticipant: "Lihat Web Peserta", btnLogout: "🚪 Keluar",
+                statTotal: "Total Sesi", statOpen: "Sesi Buka", statFull: "Sesi Penuh (Full)", statHidden: "Disembunyikan",
+                lblControlList: "Daftar Kontrol Sesi", btnOpenAll: "🔓 Buka Semua Sesi", btnMarkAllFull: "🔒 Tandai Semua Full",
+                btnSaveDb: "💾 Simpan Perubahan", toastSaved: "✅ Berhasil disimpan ke V2! Peserta langsung tersinkron."
+            },
+            en: {
+                adminTitle: "PAPIH GAMING V2", adminSub: "Scrim Management Admin Panel V2",
+                lblEmail: "Admin Email", lblPass: "Password", btnEnter: "Sign In", btnBackWeb: "← Back to Registration Page",
+                dashHeading: "SCRIM SESSION CONTROL V2", btnViewParticipant: "View Participant Web", btnLogout: "🚪 Sign Out",
+                statTotal: "Total Sessions", statOpen: "Open Sessions", statFull: "Full Sessions", statHidden: "Hidden Sessions",
+                lblControlList: "Session Control List", btnOpenAll: "🔓 Open All Sessions", btnMarkAllFull: "🔒 Mark All Full",
+                btnSaveDb: "💾 Save Changes", toastSaved: "✅ Saved successfully to V2! Synced live."
+            },
+            pt: {
+                adminTitle: "PAPIH GAMING V2", adminSub: "Painel de Administração V2",
+                lblEmail: "Email do Admin", lblPass: "Senha", btnEnter: "Entrar", btnBackWeb: "← Voltar à Inscrição",
+                dashHeading: "GERENCIAR SESSÕES V2", btnViewParticipant: "Ver Site dos Jogadores", btnLogout: "🚪 Sair",
+                statTotal: "Total de Sessões", statOpen: "Sessões Abertas", statFull: "Sessões Lotadas", statHidden: "Ocultas",
+                lblControlList: "Lista de Sessões", btnOpenAll: "🔓 Abrir Todas", btnMarkAllFull: "🔒 Marcar Todas Lotadas",
+                btnSaveDb: "💾 Salvar Alterações", toastSaved: "✅ Salvo com sucesso no V2!"
+            },
+            th: {
+                adminTitle: "PAPIH GAMING V2", adminSub: "แผงควบคุมสครีม V2",
+                lblEmail: "อีเมลแอดมิน", lblPass: "รหัสผ่าน", btnEnter: "เข้าสู่ระบบ", btnBackWeb: "← กลับไปหน้าลงทะเบียน",
+                dashHeading: "จัดการรอบเวลาสครีม V2", btnViewParticipant: "ดูหน้าเว็บผู้เข้าแข่งขัน", btnLogout: "🚪 ออกจากระบบ",
+                statTotal: "รอบทั้งหมด", statOpen: "รอบที่เปิด", statFull: "รอบที่เต็ม", statHidden: "รอบที่ปิด",
+                lblControlList: "รายการควบคุมรอบเวลา", btnOpenAll: "🔓 เปิดทั้งหมด", btnMarkAllFull: "🔒 ทำเครื่องหมายเต็มทั้งหมด",
+                btnSaveDb: "💾 บันทึกการเปลี่ยนแปลง", toastSaved: "✅ บันทึกสำเร็จ ข้อมูลซิงค์เรียบร้อย"
+            },
+            vn: {
+                adminTitle: "PAPIH GAMING V2", adminSub: "Bảng Điều Khiển Admin V2",
+                lblEmail: "Email Admin", lblPass: "Mật khẩu", btnEnter: "Đăng Nhập", btnBackWeb: "← Quay lại trang Đăng ký",
+                dashHeading: "QUẢN LÝ CA ĐẤU V2", btnViewParticipant: "Xem Web Thí Sinh", btnLogout: "🚪 Đăng Xuất",
+                statTotal: "Tổng Ca Đấu", statOpen: "Ca Đang Mở", statFull: "Ca Đã Đầy", statHidden: "Đã Ẩn",
+                lblControlList: "Danh Sách Ca Đấu", btnOpenAll: "🔓 Mở Tất Cả", btnMarkAllFull: "🔒 Đánh Dấu Đầy Hết",
+                btnSaveDb: "💾 Lưu Thay Đổi", toastSaved: "✅ Đã lưu thành công vào V2!"
+            },
+            es: {
+                adminTitle: "PAPIH GAMING V2", adminSub: "Panel de Administración V2",
+                lblEmail: "Correo del Admin", lblPass: "Contraseña", btnEnter: "Ingresar", btnBackWeb: "← Volver al Registro",
+                dashHeading: "CONTROL DE SCRIMS V2", btnViewParticipant: "Ver Web de Participantes", btnLogout: "🚪 Salir",
+                statTotal: "Total Sesiones", statOpen: "Sesiones Abiertas", statFull: "Sesiones Llenas", statHidden: "Ocultas",
+                lblControlList: "Lista de Control", btnOpenAll: "🔓 Abrir Todas", btnMarkAllFull: "🔒 Marcar Todas Llenas",
+                btnSaveDb: "💾 Guardar Cambios", toastSaved: "✅ ¡Guardado con éxito en V2!"
+            },
+            ar: {
+                adminTitle: "PAPIH GAMING V2", adminSub: "لوحة التحكم للإصدار V2",
+                lblEmail: "بريد الإدارة", lblPass: "كلمة المرور", btnEnter: "دخول", btnBackWeb: "← العودة لصفحة التسجيل",
+                dashHeading: "إدارة جلسات السكريم V2", btnViewParticipant: "عرض صفحة المشاركين", btnLogout: "🚪 تسجيل خروج",
+                statTotal: "إجمالي الجلسات", statOpen: "الجلسات المتاحة", statFull: "الجلسات الممتلئة", statHidden: "المخفية",
+                lblControlList: "قائمة التحكم بالجلسات", btnOpenAll: "🔓 فتح الكل", btnMarkAllFull: "🔒 تعيين الكل كممتلئ",
+                btnSaveDb: "💾 حفظ التغييرات", toastSaved: "✅ تم الحفظ بنجاح في الإصدار V2!"
+            }
+        };
+
+        const langLabels = { id: 'ID', en: 'EN', pt: 'PT', th: 'TH', vn: 'VN', es: 'ES', ar: 'AR' };
+
+        function toggleLangDropdown() {
+            document.getElementById('langMenu').classList.toggle('show');
+        }
+
+        function selectLang(lang) {
+            currentLang = lang;
+            localStorage.setItem('scrim_lang', lang);
+
+            const curLabel = document.getElementById('currentLangLabel');
+            if (curLabel) curLabel.textContent = langLabels[lang] || lang.toUpperCase();
+
+            document.querySelectorAll('.lang-item').forEach(el => {
+                el.classList.toggle('active', el.getAttribute('data-lang') === lang);
+            });
+
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (adminTranslations[lang] && adminTranslations[lang][key]) {
+                    el.textContent = adminTranslations[lang][key];
+                }
+            });
+
+            const menu = document.getElementById('langMenu');
+            if (menu) menu.classList.remove('show');
+        }
+
+        document.addEventListener('click', (e) => {
+            const wrapper = document.getElementById('langDropdownWrapper');
+            const menu = document.getElementById('langMenu');
+            if (wrapper && menu && !wrapper.contains(e.target)) {
+                menu.classList.remove('show');
+            }
+        });
+
+        function toggleTheme() {
+            const nextTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+            setTheme(nextTheme);
+        }
+
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('scrim_theme', theme);
+            const btn = document.getElementById('themeToggleBtn');
+            if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
+        }
+
+        // ==================== AUTH STATE LISTENER ====================
+        auth.onAuthStateChanged((user) => {
+            const loginSection = document.getElementById('loginSection');
+            const dashboardSection = document.getElementById('dashboardSection');
+
+            if (user) {
+                loginSection.style.display = 'none';
+                dashboardSection.style.display = 'block';
+                document.getElementById('userEmailDisplay').textContent = user.email || 'Admin';
+                loadDataFromDatabase();
+            } else {
+                loginSection.style.display = 'block';
+                dashboardSection.style.display = 'none';
+            }
+        });
+
+        function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            const btn = document.getElementById('btnLogin');
+            const alertBox = document.getElementById('loginAlert');
+
+            alertBox.classList.remove('show');
+            btn.disabled = true;
+            btn.textContent = 'Memverifikasi...';
+
+            auth.signInWithEmailAndPassword(email, password)
+                .catch((err) => {
+                    let msg = 'Gagal login. Periksa email dan password.';
+                    if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+                        msg = 'Email atau password salah!';
+                    }
+                    alertBox.textContent = msg;
+                    alertBox.classList.add('show');
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.textContent = adminTranslations[currentLang].btnEnter || 'Masuk ke Panel';
+                });
+        }
+
+        function handleLogout() {
+            if (confirm('Yakin ingin keluar?')) {
+                auth.signOut();
+            }
+        }
+
+        function loadDataFromDatabase() {
+            rtdb.ref(RTDB_V2_PATH).on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    currentHidden = data.hidden || [];
+                    currentFull = data.full || [];
+                }
+                renderSessionGrid();
+                updateStats();
+            }, (err) => {
+                console.warn('Realtime sync warning:', err);
+            });
+        }
+
+        function renderSessionGrid() {
+            const container = document.getElementById('sessionListGrid');
+            container.innerHTML = '';
+
+            MASTER_SESSIONS.forEach((s) => {
+                const isHidden = currentHidden.some(h => h.time === s.time && h.type === s.type);
+                const isFull = currentFull.some(f => f.time === s.time && f.type === s.type);
+
+                let cardClasses = 'session-ctrl-card';
+                if (isHidden) cardClasses += ' state-hidden';
+                else if (isFull) cardClasses += ' state-full';
+
+                const typeLabel = s.type === 'daily' ? 'DAILY' : 'NIGHT';
+
+                const card = document.createElement('div');
+                card.className = cardClasses;
+                card.innerHTML = `
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span class="session-time-num">${s.time}</span>
+                            <span class="tag-pill ${s.type}">${typeLabel}</span>
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">Rp ${s.price} / slot</div>
+                    </div>
+                    <div class="toggles-group">
+                        <label class="toggle-item hide-opt" title="Centang untuk menyembunyikan dari formulir">
+                            <input type="checkbox" class="chk-hide" data-time="${s.time}" data-type="${s.type}" ${isHidden ? 'checked' : ''} onchange="onToggleChange()">
+                            Sembunyikan
+                        </label>
+                        <label class="toggle-item full-opt" title="Centang untuk menandai slot penuh">
+                            <input type="checkbox" class="chk-full" data-time="${s.time}" data-type="${s.type}" ${isFull ? 'checked' : ''} onchange="onToggleChange()">
+                            Full
+                        </label>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function onToggleChange() {
+            collectCurrentCheckboxes();
+            renderSessionGrid();
+            updateStats();
+        }
+
+        function collectCurrentCheckboxes() {
+            const hidden = [];
+            const full = [];
+
+            document.querySelectorAll('#sessionListGrid .chk-hide').forEach(cb => {
+                if (cb.checked) hidden.push({ time: cb.dataset.time, type: cb.dataset.type });
+            });
+            document.querySelectorAll('#sessionListGrid .chk-full').forEach(cb => {
+                if (cb.checked) full.push({ time: cb.dataset.time, type: cb.dataset.type });
+            });
+
+            currentHidden = hidden;
+            currentFull = full;
+        }
+
+        function updateStats() {
+            const total = MASTER_SESSIONS.length;
+            const hiddenCount = currentHidden.length;
+            const fullCount = currentFull.length;
+            const activeCount = Math.max(0, total - hiddenCount - fullCount);
+
+            document.getElementById('statTotal').textContent = total;
+            document.getElementById('statActive').textContent = activeCount;
+            document.getElementById('statFull').textContent = fullCount;
+            document.getElementById('statHidden').textContent = hiddenCount;
+        }
+
+        function resetAllStates() {
+            if (confirm('Buka semua sesi V2?')) {
+                currentHidden = [];
+                currentFull = [];
+                renderSessionGrid();
+                updateStats();
+            }
+        }
+
+        function markAllFull() {
+            if (confirm('Tandai semua sesi V2 sebagai FULL?')) {
+                currentFull = MASTER_SESSIONS.map(s => ({ time: s.time, type: s.type }));
+                renderSessionGrid();
+                updateStats();
+            }
+        }
+
+        function saveToDatabase() {
+            collectCurrentCheckboxes();
+            const btn = document.getElementById('btnSaveDb');
+            const origText = btn.textContent;
+
+            btn.disabled = true;
+            btn.textContent = '⏳ Menyimpan...';
+
+            rtdb.ref(RTDB_V2_PATH).set({
+                hidden: currentHidden,
+                full: currentFull,
+                updatedAt: new Date().toISOString()
+            }).then(() => {
+                showToast(adminTranslations[currentLang].toastSaved || '✅ Berhasil disimpan ke V2!', 'success');
+            }).catch((err) => {
+                showToast('❌ Gagal: ' + err.message, 'error');
+            }).finally(() => {
+                btn.disabled = false;
+                btn.textContent = origText;
+            });
+        }
+
+        function showToast(msg, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => { toast.classList.remove('show'); }, 3000);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('scrim_theme') || 'dark';
+            setTheme(savedTheme);
+            const savedLang = localStorage.getItem('scrim_lang') || 'id';
+            selectLang(savedLang);
+        });
+    </script>
+</body>
+</html>
