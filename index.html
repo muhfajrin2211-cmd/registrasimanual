@@ -3052,7 +3052,7 @@ function bersihkanSesiSepuluh() {
                     <div class="success-row">
                         <span class="success-label" data-i18n="rowWAAdmin">Nomor WA Admin:</span>
                         <span id="step3AdminWa" class="success-val" style="color:var(--text-primary);">+62
-                            851-6623-5006</span>
+                            881081120205</span>
                     </div>
                 </div>
                 <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:16px;" data-i18n="noteClickWA">
@@ -3071,7 +3071,7 @@ function bersihkanSesiSepuluh() {
     <script>
         // ==================== KONFIGURASI WEB 2 ====================
         const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyDqmvM05WIth-Lsv0ocsGR8j3fKG1T36nwWr4JpoR4au3UpFpGwOR733KzQwsitMZhTw/exec';
-        const WA_ADMIN_NUMBER = '6285166235006';
+        const WA_ADMIN_NUMBER = '62881081120205';
 
         // ==================== FIREBASE REALTIME DATABASE ====================
         const firebaseConfig = {
@@ -3712,14 +3712,14 @@ function bersihkanSesiSepuluh() {
             const sessionsStr = state.selectedSessions.map(s => `${s.time} ${s.type === 'daily' ? 'DAILY SCRIM' : 'NIGHT SCRIM'}`).join(', ');
             return `Halo Admin Papih Gaming, saya mau konfirmasi registrasi scrim:
 
-📌 *KODE SCRIM:* ${state.transactionId}
-🛡️ *Nama Tim:* ${state.teamName}
-👤 *Nick Kapten:* ${state.captainNick}
-📱 *No WhatsApp:* ${state.whatsappNumber}
-⏰ *Sesi Dipilih:* ${sessionsStr}
-💰 *Total Bayar:* Rp ${state.totalPrice.toLocaleString('id-ID')}
+ KODE SCRIM: ${state.transactionId}
+ Nama Tim: ${state.teamName}
+ Nick Kapten: ${state.captainNick}
+ No WhatsApp: ${state.whatsappNumber}
+ Sesi Dipilih: ${sessionsStr}
+ Total Bayar: Rp ${state.totalPrice.toLocaleString('id-ID')}
 
-✅ Bukti transfer & logo tim sudah saya lampirkan melalui website. Mohon dicek. Terima kasih!`;
+`;
         }
 
         function openWhatsApp() {
