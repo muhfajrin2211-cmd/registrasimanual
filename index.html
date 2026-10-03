@@ -14,6 +14,1269 @@
 
 
 
+/**
+ * ============================================================================
+ * 2. WEBHOOK PENDAFTARAN WEBSITE (doPost) - DILENGKAPI LOCK SERVICE ANTI HILANG
+ * ============================================================================
+ */
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    // Kunci antrian selama maksimal 30 detik agar jika banyak peserta daftar barengan tidak tabrakan
+    lock.waitLock(30000);
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("DATA") || ss.getActiveSheet();
+    var data = JSON.parse(e.postData.contents);
+
+    var timestamp = Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd HH:mm:ss");
+
+    var folderName = "Data Scrim Papih HD";
+    var folders = DriveApp.getFoldersByName(folderName);
+    var targetFolder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+
+    // 1. Simpan LOGO TIM (Format Direct LH3 - Ringan & Cepat)
+    var cellLogo = "-";
+    if (data.logoTim && data.logoTim.startsWith("data:image")) {
+      try {
+        var base64Logo = data.logoTim.split(",")[1];
+        var decodedLogo = Utilities.base64Decode(base64Logo);
+        var blobLogo = Utilities.newBlob(decodedLogo, "image/png", "Logo_" + (data.transactionId || "Tim") + ".png");
+        var fileLogo = targetFolder.createFile(blobLogo);
+        fileLogo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        
+        var rawLogoUrl = "https://lh3.googleusercontent.com/d/" + fileLogo.getId();
+        cellLogo = '=HYPERLINK("' + rawLogoUrl + '", "Logo Tim")';
+      } catch (errLogo) {
+        cellLogo = "Gagal simpan logo: " + errLogo.message;
+      }
+    }
+
+    // 2. Simpan BUKTI TRANSFER (Format Direct LH3 - Ringan & Cepat Tanpa Loading Drive)
+    var cellBukti = "-";
+    if (data.bukti && data.bukti.startsWith("data:image")) {
+      try {
+        var base64Bukti = data.bukti.split(",")[1];
+        var decodedBukti = Utilities.base64Decode(base64Bukti);
+        var blobBukti = Utilities.newBlob(decodedBukti, "image/jpeg", "Bukti_" + (data.transactionId || "Bayar") + ".jpg");
+        var fileBukti = targetFolder.createFile(blobBukti);
+        fileBukti.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        
+        var rawBuktiUrl = "https://lh3.googleusercontent.com/d/" + fileBukti.getId();
+        cellBukti = '=HYPERLINK("' + rawBuktiUrl + '", "Bukti TF")';
+      } catch (errBukti) {
+        cellBukti = "Gagal simpan bukti: " + errBukti.message;
+      }
+    }
+
+    // Tulis baris pendaftaran ke sheet DATA
+    sheet.appendRow([
+      timestamp,
+      data.transactionId || "-",
+      data.teamName || "-",
+      cellLogo,
+      data.captainNick || "-",
+      "'" + (data.whatsappNumber || "-"),
+      data.sessions || "-",
+      data.totalPrice || 0,
+      cellBukti,
+      data.status || "Menunggu Konfirmasi"
+    ]);
+
+    // Paksa Spreadsheet langsung menyimpan tanpa ditunda di memori
+    SpreadsheetApp.flush();
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    // Lepas kunci antrian untuk pendaftar berikutnya
+    lock.releaseLock();
+  }
+}
+
+/**
+ * ============================================================================
+ * 3. TRIGGER OTOMATIS (onEdit)
+ * ============================================================================
+ */
+function onEdit(e) {
+  if (!e) return;
+
+  var range = e.range;
+  var sheet = range.getSheet();
+
+  if (sheet.getName() !== "DATA" || range.getColumn() !== 10 || range.getRow() < 2) {
+    return;
+  }
+
+  var val = String(range.getValue()).trim().toUpperCase();
+  var row = range.getRow();
+
+  // KONDISI 1: DIKETIK 'OK'
+  if (val === "OK") {
+    var hasil = masukkanTimKeAdminLive(sheet, row);
+    if (hasil.sukses) {
+      range.setValue("OK (TERDAFTAR)");
+    } else {
+      range.setValue("GAGAL: " + hasil.pesan);
+    }
+  } 
+  // KONDISI 2: JIKA STATUS DIHAPUS (DIKOSONGKAN / DIUBAH)
+  else if (val === "" || (val.indexOf("OK") === -1 && val.indexOf("GAGAL") === -1)) {
+    hapusTimDariAdminLive(sheet, row);
+  }
+}
+
+/**
+ * ============================================================================
+ * 4. PENGISIAN SLOT KE 'ADMIN LIVE' SECARA AKURAT
+ * ============================================================================
+ */
+function masukkanTimKeAdminLive(dataSheet, row) {
+  var ss = dataSheet.getParent();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) {
+    return { sukses: false, pesan: "Sheet ADMIN LIVE tidak ditemukan" };
+  }
+
+  var namaTim = String(dataSheet.getRange(row, 3).getValue()).trim();
+  var sesiValue = String(dataSheet.getRange(row, 7).getValue()).trim();
+  var logoTimUrl = ambilUrlDariCell(dataSheet.getRange(row, 4));
+
+  if (!namaTim || !sesiValue) {
+    return { sukses: false, pesan: "Nama Tim atau Sesi kosong" };
+  }
+
+  var sessionList = sesiValue.split(",");
+  var maxRows = Math.max(adminSheet.getLastRow(), 450);
+  var adminData = adminSheet.getRange(1, 1, maxRows, 3).getValues();
+
+  var berhasilCount = 0;
+  var pesanError = "";
+
+  for (var s = 0; s < sessionList.length; s++) {
+    var rawSesi = sessionList[s].trim();
+    if (!rawSesi) continue;
+
+    // 1. Cari baris judul sesi secara presisi (Jam + Tipe Sesi)
+    var sessionRowIdx = cariBarisSesi(adminData, rawSesi);
+    if (sessionRowIdx === -1) {
+      pesanError = "Sesi '" + rawSesi + "' tidak cocok di ADMIN LIVE";
+      continue;
+    }
+
+    // 2. Cari letak Slot No 1 dari sesi tersebut
+    var slotStartIdx = -1;
+    for (var k = sessionRowIdx + 1; k < Math.min(sessionRowIdx + 5, adminData.length); k++) {
+      var noVal = String(adminData[k][0]).trim();
+      if (noVal === "1") {
+        slotStartIdx = k;
+        break;
+      }
+    }
+
+    if (slotStartIdx === -1) {
+      slotStartIdx = sessionRowIdx + 2;
+    }
+
+    // 3. Mencegah nama tim terdaftar dobel di sesi yang sama
+    var sudahTerdaftar = false;
+    for (var chk = slotStartIdx; chk < adminData.length; chk++) {
+      var chkNo = String(adminData[chk][0]).trim();
+      var chkTim = String(adminData[chk][1]).trim().toUpperCase();
+      if (chkNo === "" || isNaN(chkNo)) break;
+      if (chkTim === namaTim.toUpperCase()) {
+        sudahTerdaftar = true;
+        break;
+      }
+    }
+
+    if (sudahTerdaftar) {
+      berhasilCount++;
+      continue;
+    }
+
+    // 4. Cari slot kosong paling atas (1, 2, 3... 15)
+    var targetSlotRow = -1;
+    for (var j = slotStartIdx; j < adminData.length; j++) {
+      var curNo = String(adminData[j][0]).trim();
+      var curTim = String(adminData[j][1]).trim();
+
+      if (curNo === "" || isNaN(curNo)) {
+        break;
+      }
+
+      // Slot kosong ditemukan
+      if (curTim === "" || curTim === "-") {
+        targetSlotRow = j + 1;
+
+        // Isi Nama Tim di Kolom B
+        adminSheet.getRange(targetSlotRow, 2).setValue(namaTim);
+
+        // Isi Logo di Kolom C (Teks Link 'Logo Tim' yang ringan)
+        if (logoTimUrl.startsWith("http")) {
+          adminSheet.getRange(targetSlotRow, 3).setFormula('=HYPERLINK("' + logoTimUrl + '", "Logo Tim")');
+        } else {
+          adminSheet.getRange(targetSlotRow, 3).setValue("-");
+        }
+
+        adminData[j][1] = namaTim;
+        berhasilCount++;
+        break;
+      }
+    }
+
+    if (targetSlotRow === -1 && !pesanError && !sudahTerdaftar) {
+      pesanError = "Slot untuk sesi '" + rawSesi + "' sudah penuh";
+    }
+  }
+
+  if (berhasilCount > 0) {
+    return { sukses: true };
+  } else {
+    return { sukses: false, pesan: pesanError || "Gagal masuk slot" };
+  }
+}
+
+/**
+ * ============================================================================
+ * 5. PENCARIAN SESI PRESISI
+ * ============================================================================
+ */
+function cariBarisSesi(adminData, targetSesi) {
+  var cleanTarget = String(targetSesi).toUpperCase().replace(/:/g, ".");
+  
+  var matchJam = cleanTarget.match(/\b\d{1,2}\.\d{2}\b/);
+  if (!matchJam) return -1;
+  
+  var jamTarget = matchJam[0];
+  var jamFormatted = jamTarget.length === 4 ? "0" + jamTarget : jamTarget;
+
+  var isNight = cleanTarget.indexOf("NIGHT") !== -1;
+  var isDaily = cleanTarget.indexOf("DAILY") !== -1;
+
+  for (var i = 0; i < adminData.length; i++) {
+    var textBaris = (String(adminData[i][0]) + " " + String(adminData[i][1])).toUpperCase().replace(/:/g, ".");
+    
+    var hasJam = (textBaris.indexOf(jamTarget) !== -1 || textBaris.indexOf(jamFormatted) !== -1);
+    if (!hasJam) continue;
+
+    if (isNight && textBaris.indexOf("NIGHT") !== -1) {
+      return i;
+    }
+    if (isDaily && textBaris.indexOf("DAILY") !== -1 && textBaris.indexOf("NIGHT") === -1) {
+      return i;
+    }
+    if (!isNight && !isDaily) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+/**
+ * ============================================================================
+ * 6. HAPUS TIM DARI 'ADMIN LIVE' (JIKA STATUS OK DIHAPUS)
+ * ============================================================================
+ */
+function hapusTimDariAdminLive(dataSheet, row) {
+  var ss = dataSheet.getParent();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) return;
+
+  var namaTim = String(dataSheet.getRange(row, 3).getValue()).trim();
+  if (!namaTim || namaTim === "-") return;
+
+  var maxRows = Math.max(adminSheet.getLastRow(), 450);
+  var adminData = adminSheet.getRange(1, 1, maxRows, 3).getValues();
+  var adaDihapus = false;
+
+  for (var i = 0; i < adminData.length; i++) {
+    var curTim = String(adminData[i][1]).trim().toUpperCase();
+    var curNo = String(adminData[i][0]).trim();
+
+    if (!isNaN(curNo) && curNo !== "" && curTim === namaTim.toUpperCase()) {
+      var targetRow = i + 1;
+      adminSheet.getRange(targetRow, 2).clearContent();
+      adminSheet.getRange(targetRow, 3).clearContent();
+      adminData[i][1] = "";
+      adaDihapus = true;
+    }
+  }
+
+  if (adaDihapus) {
+    ss.toast("Tim '" + namaTim + "' dihapus dari ADMIN LIVE.", "Status Dihapus", 3);
+  }
+}
+
+/**
+ * ============================================================================
+ * 7. HELPER: AMBIL URL ASLI DARI HYPERLINK
+ * ============================================================================
+ */
+function ambilUrlDariCell(cellRange) {
+  var formula = cellRange.getFormula();
+  if (formula && formula.toUpperCase().indexOf("HYPERLINK") !== -1) {
+    var match = formula.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  var richText = cellRange.getRichTextValue();
+  if (richText && richText.getLinkUrl()) {
+    return richText.getLinkUrl().trim();
+  }
+
+  return String(cellRange.getValue()).trim();
+}
+
+/**
+ * ============================================================================
+ * 8. MENU: SINKRONKAN SEMUA YANG OK
+ * ============================================================================
+ */
+function prosesSemuaStatusOK() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dataSheet = ss.getSheetByName("DATA");
+  if (!dataSheet) return;
+
+  var lastRow = dataSheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var statusValues = dataSheet.getRange(2, 10, lastRow - 1, 1).getValues();
+  var count = 0;
+
+  for (var i = 0; i < statusValues.length; i++) {
+    var rawStatus = String(statusValues[i][0]).trim().toUpperCase();
+    var currentRow = i + 2;
+
+    if (rawStatus === "OK" || rawStatus.indexOf("OK") === 0) {
+      var res = masukkanTimKeAdminLive(dataSheet, currentRow);
+      if (res.sukses) {
+        dataSheet.getRange(currentRow, 10).setValue("OK (TERDAFTAR)");
+        count++;
+      }
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Selesai! " + count + " pendaftaran berhasil diproses ke ADMIN LIVE.");
+}
+
+/**
+ * ============================================================================
+ * 9. MENU: UBAH SEMUA LINK LAMA (DRIVE) JADI DIRECT LH3 (SUPER RINGAN)
+ * ============================================================================
+ */
+function rapikanLinkDataLama() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dataSheet = ss.getSheetByName("DATA");
+  if (!dataSheet) return;
+
+  var lastRow = dataSheet.getLastRow();
+  if (lastRow < 2) return;
+
+  for (var r = 2; r <= lastRow; r++) {
+    // 1. Ubah Kolom D (Logo Tim)
+    var cellLogo = dataSheet.getRange(r, 4);
+    var urlLogo = ambilUrlDariCell(cellLogo);
+    if (urlLogo.startsWith("http")) {
+      urlLogo = konversiKeDirectLh3(urlLogo);
+      cellLogo.setFormula('=HYPERLINK("' + urlLogo + '", "Logo Tim")');
+    }
+
+    // 2. Ubah Kolom I (Bukti TF) jadi Direct LH3 (Tidak berat lagi)
+    var cellBukti = dataSheet.getRange(r, 9);
+    var urlBukti = ambilUrlDariCell(cellBukti);
+    if (urlBukti.startsWith("http")) {
+      urlBukti = konversiKeDirectLh3(urlBukti);
+      cellBukti.setFormula('=HYPERLINK("' + urlBukti + '", "Bukti TF")');
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Berhasil! Semua Bukti TF dan Logo Tim telah diubah menjadi link direct LH3 (sangat ringan dan cepat dibuka).");
+}
+
+function konversiKeDirectLh3(url) {
+  if (!url) return "";
+  if (url.indexOf("lh3.googleusercontent.com") !== -1) return url;
+  
+  var match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return "https://lh3.googleusercontent.com/d/" + match[1];
+  }
+  return url;
+}
+
+/**
+ * ============================================================================
+ * 10. MENU: BERSIHKAN DATA NYASAR DI SESI 10.00
+ * ============================================================================
+ */
+function bersihkanSesiSepuluh() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) return;
+
+  adminSheet.getRange(3, 2, 15, 2).clearContent();
+  SpreadsheetApp.getUi().alert("Sesi 10.00 sudah bersih kembali!");
+}/**
+ * ============================================================================
+ * 1. MENU DI GOOGLE SHEETS
+ * ============================================================================
+ */
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu("⚡ MENU SCRIM")
+    .addItem("Proses / Sinkronkan Semua Tim Berstatus OK", "prosesSemuaStatusOK")
+    .addItem("Ubah Semua Link Lama Jadi Direct Cepat (Ringan)", "rapikanLinkDataLama")
+    .addItem("Bersihkan Tim Nyasar di Sesi 10.00", "bersihkanSesiSepuluh")
+    .addToUi();
+}
+
+/**
+ * ============================================================================
+ * 2. WEBHOOK PENDAFTARAN WEBSITE (doPost) - DILENGKAPI LOCK SERVICE ANTI HILANG
+ * ============================================================================
+ */
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    // Kunci antrian selama maksimal 30 detik agar jika banyak peserta daftar barengan tidak tabrakan
+    lock.waitLock(30000);
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("DATA") || ss.getActiveSheet();
+    var data = JSON.parse(e.postData.contents);
+
+    var timestamp = Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd HH:mm:ss");
+
+    var folderName = "Data Scrim Papih HD";
+    var folders = DriveApp.getFoldersByName(folderName);
+    var targetFolder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+
+    // 1. Simpan LOGO TIM (Format Direct LH3 - Ringan & Cepat)
+    var cellLogo = "-";
+    if (data.logoTim && data.logoTim.startsWith("data:image")) {
+      try {
+        var base64Logo = data.logoTim.split(",")[1];
+        var decodedLogo = Utilities.base64Decode(base64Logo);
+        var blobLogo = Utilities.newBlob(decodedLogo, "image/png", "Logo_" + (data.transactionId || "Tim") + ".png");
+        var fileLogo = targetFolder.createFile(blobLogo);
+        fileLogo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        
+        var rawLogoUrl = "https://lh3.googleusercontent.com/d/" + fileLogo.getId();
+        cellLogo = '=HYPERLINK("' + rawLogoUrl + '", "Logo Tim")';
+      } catch (errLogo) {
+        cellLogo = "Gagal simpan logo: " + errLogo.message;
+      }
+    }
+
+    // 2. Simpan BUKTI TRANSFER (Format Direct LH3 - Ringan & Cepat Tanpa Loading Drive)
+    var cellBukti = "-";
+    if (data.bukti && data.bukti.startsWith("data:image")) {
+      try {
+        var base64Bukti = data.bukti.split(",")[1];
+        var decodedBukti = Utilities.base64Decode(base64Bukti);
+        var blobBukti = Utilities.newBlob(decodedBukti, "image/jpeg", "Bukti_" + (data.transactionId || "Bayar") + ".jpg");
+        var fileBukti = targetFolder.createFile(blobBukti);
+        fileBukti.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        
+        var rawBuktiUrl = "https://lh3.googleusercontent.com/d/" + fileBukti.getId();
+        cellBukti = '=HYPERLINK("' + rawBuktiUrl + '", "Bukti TF")';
+      } catch (errBukti) {
+        cellBukti = "Gagal simpan bukti: " + errBukti.message;
+      }
+    }
+
+    // Tulis baris pendaftaran ke sheet DATA
+    sheet.appendRow([
+      timestamp,
+      data.transactionId || "-",
+      data.teamName || "-",
+      cellLogo,
+      data.captainNick || "-",
+      "'" + (data.whatsappNumber || "-"),
+      data.sessions || "-",
+      data.totalPrice || 0,
+      cellBukti,
+      data.status || "Menunggu Konfirmasi"
+    ]);
+
+    // Paksa Spreadsheet langsung menyimpan tanpa ditunda di memori
+    SpreadsheetApp.flush();
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    // Lepas kunci antrian untuk pendaftar berikutnya
+    lock.releaseLock();
+  }
+}
+
+/**
+ * ============================================================================
+ * 3. TRIGGER OTOMATIS (onEdit)
+ * ============================================================================
+ */
+function onEdit(e) {
+  if (!e) return;
+
+  var range = e.range;
+  var sheet = range.getSheet();
+
+  if (sheet.getName() !== "DATA" || range.getColumn() !== 10 || range.getRow() < 2) {
+    return;
+  }
+
+  var val = String(range.getValue()).trim().toUpperCase();
+  var row = range.getRow();
+
+  // KONDISI 1: DIKETIK 'OK'
+  if (val === "OK") {
+    var hasil = masukkanTimKeAdminLive(sheet, row);
+    if (hasil.sukses) {
+      range.setValue("OK (TERDAFTAR)");
+    } else {
+      range.setValue("GAGAL: " + hasil.pesan);
+    }
+  } 
+  // KONDISI 2: JIKA STATUS DIHAPUS (DIKOSONGKAN / DIUBAH)
+  else if (val === "" || (val.indexOf("OK") === -1 && val.indexOf("GAGAL") === -1)) {
+    hapusTimDariAdminLive(sheet, row);
+  }
+}
+
+/**
+ * ============================================================================
+ * 4. PENGISIAN SLOT KE 'ADMIN LIVE' SECARA AKURAT
+ * ============================================================================
+ */
+function masukkanTimKeAdminLive(dataSheet, row) {
+  var ss = dataSheet.getParent();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) {
+    return { sukses: false, pesan: "Sheet ADMIN LIVE tidak ditemukan" };
+  }
+
+  var namaTim = String(dataSheet.getRange(row, 3).getValue()).trim();
+  var sesiValue = String(dataSheet.getRange(row, 7).getValue()).trim();
+  var logoTimUrl = ambilUrlDariCell(dataSheet.getRange(row, 4));
+
+  if (!namaTim || !sesiValue) {
+    return { sukses: false, pesan: "Nama Tim atau Sesi kosong" };
+  }
+
+  var sessionList = sesiValue.split(",");
+  var maxRows = Math.max(adminSheet.getLastRow(), 450);
+  var adminData = adminSheet.getRange(1, 1, maxRows, 3).getValues();
+
+  var berhasilCount = 0;
+  var pesanError = "";
+
+  for (var s = 0; s < sessionList.length; s++) {
+    var rawSesi = sessionList[s].trim();
+    if (!rawSesi) continue;
+
+    // 1. Cari baris judul sesi secara presisi (Jam + Tipe Sesi)
+    var sessionRowIdx = cariBarisSesi(adminData, rawSesi);
+    if (sessionRowIdx === -1) {
+      pesanError = "Sesi '" + rawSesi + "' tidak cocok di ADMIN LIVE";
+      continue;
+    }
+
+    // 2. Cari letak Slot No 1 dari sesi tersebut
+    var slotStartIdx = -1;
+    for (var k = sessionRowIdx + 1; k < Math.min(sessionRowIdx + 5, adminData.length); k++) {
+      var noVal = String(adminData[k][0]).trim();
+      if (noVal === "1") {
+        slotStartIdx = k;
+        break;
+      }
+    }
+
+    if (slotStartIdx === -1) {
+      slotStartIdx = sessionRowIdx + 2;
+    }
+
+    // 3. Mencegah nama tim terdaftar dobel di sesi yang sama
+    var sudahTerdaftar = false;
+    for (var chk = slotStartIdx; chk < adminData.length; chk++) {
+      var chkNo = String(adminData[chk][0]).trim();
+      var chkTim = String(adminData[chk][1]).trim().toUpperCase();
+      if (chkNo === "" || isNaN(chkNo)) break;
+      if (chkTim === namaTim.toUpperCase()) {
+        sudahTerdaftar = true;
+        break;
+      }
+    }
+
+    if (sudahTerdaftar) {
+      berhasilCount++;
+      continue;
+    }
+
+    // 4. Cari slot kosong paling atas (1, 2, 3... 15)
+    var targetSlotRow = -1;
+    for (var j = slotStartIdx; j < adminData.length; j++) {
+      var curNo = String(adminData[j][0]).trim();
+      var curTim = String(adminData[j][1]).trim();
+
+      if (curNo === "" || isNaN(curNo)) {
+        break;
+      }
+
+      // Slot kosong ditemukan
+      if (curTim === "" || curTim === "-") {
+        targetSlotRow = j + 1;
+
+        // Isi Nama Tim di Kolom B
+        adminSheet.getRange(targetSlotRow, 2).setValue(namaTim);
+
+        // Isi Logo di Kolom C (Teks Link 'Logo Tim' yang ringan)
+        if (logoTimUrl.startsWith("http")) {
+          adminSheet.getRange(targetSlotRow, 3).setFormula('=HYPERLINK("' + logoTimUrl + '", "Logo Tim")');
+        } else {
+          adminSheet.getRange(targetSlotRow, 3).setValue("-");
+        }
+
+        adminData[j][1] = namaTim;
+        berhasilCount++;
+        break;
+      }
+    }
+
+    if (targetSlotRow === -1 && !pesanError && !sudahTerdaftar) {
+      pesanError = "Slot untuk sesi '" + rawSesi + "' sudah penuh";
+    }
+  }
+
+  if (berhasilCount > 0) {
+    return { sukses: true };
+  } else {
+    return { sukses: false, pesan: pesanError || "Gagal masuk slot" };
+  }
+}
+
+/**
+ * ============================================================================
+ * 5. PENCARIAN SESI PRESISI
+ * ============================================================================
+ */
+function cariBarisSesi(adminData, targetSesi) {
+  var cleanTarget = String(targetSesi).toUpperCase().replace(/:/g, ".");
+  
+  var matchJam = cleanTarget.match(/\b\d{1,2}\.\d{2}\b/);
+  if (!matchJam) return -1;
+  
+  var jamTarget = matchJam[0];
+  var jamFormatted = jamTarget.length === 4 ? "0" + jamTarget : jamTarget;
+
+  var isNight = cleanTarget.indexOf("NIGHT") !== -1;
+  var isDaily = cleanTarget.indexOf("DAILY") !== -1;
+
+  for (var i = 0; i < adminData.length; i++) {
+    var textBaris = (String(adminData[i][0]) + " " + String(adminData[i][1])).toUpperCase().replace(/:/g, ".");
+    
+    var hasJam = (textBaris.indexOf(jamTarget) !== -1 || textBaris.indexOf(jamFormatted) !== -1);
+    if (!hasJam) continue;
+
+    if (isNight && textBaris.indexOf("NIGHT") !== -1) {
+      return i;
+    }
+    if (isDaily && textBaris.indexOf("DAILY") !== -1 && textBaris.indexOf("NIGHT") === -1) {
+      return i;
+    }
+    if (!isNight && !isDaily) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+/**
+ * ============================================================================
+ * 6. HAPUS TIM DARI 'ADMIN LIVE' (JIKA STATUS OK DIHAPUS)
+ * ============================================================================
+ */
+function hapusTimDariAdminLive(dataSheet, row) {
+  var ss = dataSheet.getParent();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) return;
+
+  var namaTim = String(dataSheet.getRange(row, 3).getValue()).trim();
+  if (!namaTim || namaTim === "-") return;
+
+  var maxRows = Math.max(adminSheet.getLastRow(), 450);
+  var adminData = adminSheet.getRange(1, 1, maxRows, 3).getValues();
+  var adaDihapus = false;
+
+  for (var i = 0; i < adminData.length; i++) {
+    var curTim = String(adminData[i][1]).trim().toUpperCase();
+    var curNo = String(adminData[i][0]).trim();
+
+    if (!isNaN(curNo) && curNo !== "" && curTim === namaTim.toUpperCase()) {
+      var targetRow = i + 1;
+      adminSheet.getRange(targetRow, 2).clearContent();
+      adminSheet.getRange(targetRow, 3).clearContent();
+      adminData[i][1] = "";
+      adaDihapus = true;
+    }
+  }
+
+  if (adaDihapus) {
+    ss.toast("Tim '" + namaTim + "' dihapus dari ADMIN LIVE.", "Status Dihapus", 3);
+  }
+}
+
+/**
+ * ============================================================================
+ * 7. HELPER: AMBIL URL ASLI DARI HYPERLINK
+ * ============================================================================
+ */
+function ambilUrlDariCell(cellRange) {
+  var formula = cellRange.getFormula();
+  if (formula && formula.toUpperCase().indexOf("HYPERLINK") !== -1) {
+    var match = formula.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  var richText = cellRange.getRichTextValue();
+  if (richText && richText.getLinkUrl()) {
+    return richText.getLinkUrl().trim();
+  }
+
+  return String(cellRange.getValue()).trim();
+}
+
+/**
+ * ============================================================================
+ * 8. MENU: SINKRONKAN SEMUA YANG OK
+ * ============================================================================
+ */
+function prosesSemuaStatusOK() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dataSheet = ss.getSheetByName("DATA");
+  if (!dataSheet) return;
+
+  var lastRow = dataSheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var statusValues = dataSheet.getRange(2, 10, lastRow - 1, 1).getValues();
+  var count = 0;
+
+  for (var i = 0; i < statusValues.length; i++) {
+    var rawStatus = String(statusValues[i][0]).trim().toUpperCase();
+    var currentRow = i + 2;
+
+    if (rawStatus === "OK" || rawStatus.indexOf("OK") === 0) {
+      var res = masukkanTimKeAdminLive(dataSheet, currentRow);
+      if (res.sukses) {
+        dataSheet.getRange(currentRow, 10).setValue("OK (TERDAFTAR)");
+        count++;
+      }
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Selesai! " + count + " pendaftaran berhasil diproses ke ADMIN LIVE.");
+}
+
+/**
+ * ============================================================================
+ * 9. MENU: UBAH SEMUA LINK LAMA (DRIVE) JADI DIRECT LH3 (SUPER RINGAN)
+ * ============================================================================
+ */
+function rapikanLinkDataLama() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dataSheet = ss.getSheetByName("DATA");
+  if (!dataSheet) return;
+
+  var lastRow = dataSheet.getLastRow();
+  if (lastRow < 2) return;
+
+  for (var r = 2; r <= lastRow; r++) {
+    // 1. Ubah Kolom D (Logo Tim)
+    var cellLogo = dataSheet.getRange(r, 4);
+    var urlLogo = ambilUrlDariCell(cellLogo);
+    if (urlLogo.startsWith("http")) {
+      urlLogo = konversiKeDirectLh3(urlLogo);
+      cellLogo.setFormula('=HYPERLINK("' + urlLogo + '", "Logo Tim")');
+    }
+
+    // 2. Ubah Kolom I (Bukti TF) jadi Direct LH3 (Tidak berat lagi)
+    var cellBukti = dataSheet.getRange(r, 9);
+    var urlBukti = ambilUrlDariCell(cellBukti);
+    if (urlBukti.startsWith("http")) {
+      urlBukti = konversiKeDirectLh3(urlBukti);
+      cellBukti.setFormula('=HYPERLINK("' + urlBukti + '", "Bukti TF")');
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Berhasil! Semua Bukti TF dan Logo Tim telah diubah menjadi link direct LH3 (sangat ringan dan cepat dibuka).");
+}
+
+function konversiKeDirectLh3(url) {
+  if (!url) return "";
+  if (url.indexOf("lh3.googleusercontent.com") !== -1) return url;
+  
+  var match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return "https://lh3.googleusercontent.com/d/" + match[1];
+  }
+  return url;
+}
+
+/**
+ * ============================================================================
+ * 10. MENU: BERSIHKAN DATA NYASAR DI SESI 10.00
+ * ============================================================================
+ */
+function bersihkanSesiSepuluh() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) return;
+
+  adminSheet.getRange(3, 2, 15, 2).clearContent();
+  SpreadsheetApp.getUi().alert("Sesi 10.00 sudah bersih kembali!");
+}/**
+ * ============================================================================
+ * 1. MENU DI GOOGLE SHEETS
+ * ============================================================================
+ */
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu("⚡ MENU SCRIM")
+    .addItem("Proses / Sinkronkan Semua Tim Berstatus OK", "prosesSemuaStatusOK")
+    .addItem("Ubah Semua Link Lama Jadi Direct Cepat (Ringan)", "rapikanLinkDataLama")
+    .addItem("Bersihkan Tim Nyasar di Sesi 10.00", "bersihkanSesiSepuluh")
+    .addToUi();
+}
+
+/**
+ * ============================================================================
+ * 2. WEBHOOK PENDAFTARAN WEBSITE (doPost) - DILENGKAPI LOCK SERVICE ANTI HILANG
+ * ============================================================================
+ */
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    // Kunci antrian selama maksimal 30 detik agar jika banyak peserta daftar barengan tidak tabrakan
+    lock.waitLock(30000);
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("DATA") || ss.getActiveSheet();
+    var data = JSON.parse(e.postData.contents);
+
+    var timestamp = Utilities.formatDate(new Date(), "GMT+7", "yyyy-MM-dd HH:mm:ss");
+
+    var folderName = "Data Scrim Papih HD";
+    var folders = DriveApp.getFoldersByName(folderName);
+    var targetFolder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+
+    // 1. Simpan LOGO TIM (Format Direct LH3 - Ringan & Cepat)
+    var cellLogo = "-";
+    if (data.logoTim && data.logoTim.startsWith("data:image")) {
+      try {
+        var base64Logo = data.logoTim.split(",")[1];
+        var decodedLogo = Utilities.base64Decode(base64Logo);
+        var blobLogo = Utilities.newBlob(decodedLogo, "image/png", "Logo_" + (data.transactionId || "Tim") + ".png");
+        var fileLogo = targetFolder.createFile(blobLogo);
+        fileLogo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        
+        var rawLogoUrl = "https://lh3.googleusercontent.com/d/" + fileLogo.getId();
+        cellLogo = '=HYPERLINK("' + rawLogoUrl + '", "Logo Tim")';
+      } catch (errLogo) {
+        cellLogo = "Gagal simpan logo: " + errLogo.message;
+      }
+    }
+
+    // 2. Simpan BUKTI TRANSFER (Format Direct LH3 - Ringan & Cepat Tanpa Loading Drive)
+    var cellBukti = "-";
+    if (data.bukti && data.bukti.startsWith("data:image")) {
+      try {
+        var base64Bukti = data.bukti.split(",")[1];
+        var decodedBukti = Utilities.base64Decode(base64Bukti);
+        var blobBukti = Utilities.newBlob(decodedBukti, "image/jpeg", "Bukti_" + (data.transactionId || "Bayar") + ".jpg");
+        var fileBukti = targetFolder.createFile(blobBukti);
+        fileBukti.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        
+        var rawBuktiUrl = "https://lh3.googleusercontent.com/d/" + fileBukti.getId();
+        cellBukti = '=HYPERLINK("' + rawBuktiUrl + '", "Bukti TF")';
+      } catch (errBukti) {
+        cellBukti = "Gagal simpan bukti: " + errBukti.message;
+      }
+    }
+
+    // Tulis baris pendaftaran ke sheet DATA
+    sheet.appendRow([
+      timestamp,
+      data.transactionId || "-",
+      data.teamName || "-",
+      cellLogo,
+      data.captainNick || "-",
+      "'" + (data.whatsappNumber || "-"),
+      data.sessions || "-",
+      data.totalPrice || 0,
+      cellBukti,
+      data.status || "Menunggu Konfirmasi"
+    ]);
+
+    // Paksa Spreadsheet langsung menyimpan tanpa ditunda di memori
+    SpreadsheetApp.flush();
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    // Lepas kunci antrian untuk pendaftar berikutnya
+    lock.releaseLock();
+  }
+}
+
+/**
+ * ============================================================================
+ * 3. TRIGGER OTOMATIS (onEdit)
+ * ============================================================================
+ */
+function onEdit(e) {
+  if (!e) return;
+
+  var range = e.range;
+  var sheet = range.getSheet();
+
+  if (sheet.getName() !== "DATA" || range.getColumn() !== 10 || range.getRow() < 2) {
+    return;
+  }
+
+  var val = String(range.getValue()).trim().toUpperCase();
+  var row = range.getRow();
+
+  // KONDISI 1: DIKETIK 'OK'
+  if (val === "OK") {
+    var hasil = masukkanTimKeAdminLive(sheet, row);
+    if (hasil.sukses) {
+      range.setValue("OK (TERDAFTAR)");
+    } else {
+      range.setValue("GAGAL: " + hasil.pesan);
+    }
+  } 
+  // KONDISI 2: JIKA STATUS DIHAPUS (DIKOSONGKAN / DIUBAH)
+  else if (val === "" || (val.indexOf("OK") === -1 && val.indexOf("GAGAL") === -1)) {
+    hapusTimDariAdminLive(sheet, row);
+  }
+}
+
+/**
+ * ============================================================================
+ * 4. PENGISIAN SLOT KE 'ADMIN LIVE' SECARA AKURAT
+ * ============================================================================
+ */
+function masukkanTimKeAdminLive(dataSheet, row) {
+  var ss = dataSheet.getParent();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) {
+    return { sukses: false, pesan: "Sheet ADMIN LIVE tidak ditemukan" };
+  }
+
+  var namaTim = String(dataSheet.getRange(row, 3).getValue()).trim();
+  var sesiValue = String(dataSheet.getRange(row, 7).getValue()).trim();
+  var logoTimUrl = ambilUrlDariCell(dataSheet.getRange(row, 4));
+
+  if (!namaTim || !sesiValue) {
+    return { sukses: false, pesan: "Nama Tim atau Sesi kosong" };
+  }
+
+  var sessionList = sesiValue.split(",");
+  var maxRows = Math.max(adminSheet.getLastRow(), 450);
+  var adminData = adminSheet.getRange(1, 1, maxRows, 3).getValues();
+
+  var berhasilCount = 0;
+  var pesanError = "";
+
+  for (var s = 0; s < sessionList.length; s++) {
+    var rawSesi = sessionList[s].trim();
+    if (!rawSesi) continue;
+
+    // 1. Cari baris judul sesi secara presisi (Jam + Tipe Sesi)
+    var sessionRowIdx = cariBarisSesi(adminData, rawSesi);
+    if (sessionRowIdx === -1) {
+      pesanError = "Sesi '" + rawSesi + "' tidak cocok di ADMIN LIVE";
+      continue;
+    }
+
+    // 2. Cari letak Slot No 1 dari sesi tersebut
+    var slotStartIdx = -1;
+    for (var k = sessionRowIdx + 1; k < Math.min(sessionRowIdx + 5, adminData.length); k++) {
+      var noVal = String(adminData[k][0]).trim();
+      if (noVal === "1") {
+        slotStartIdx = k;
+        break;
+      }
+    }
+
+    if (slotStartIdx === -1) {
+      slotStartIdx = sessionRowIdx + 2;
+    }
+
+    // 3. Mencegah nama tim terdaftar dobel di sesi yang sama
+    var sudahTerdaftar = false;
+    for (var chk = slotStartIdx; chk < adminData.length; chk++) {
+      var chkNo = String(adminData[chk][0]).trim();
+      var chkTim = String(adminData[chk][1]).trim().toUpperCase();
+      if (chkNo === "" || isNaN(chkNo)) break;
+      if (chkTim === namaTim.toUpperCase()) {
+        sudahTerdaftar = true;
+        break;
+      }
+    }
+
+    if (sudahTerdaftar) {
+      berhasilCount++;
+      continue;
+    }
+
+    // 4. Cari slot kosong paling atas (1, 2, 3... 15)
+    var targetSlotRow = -1;
+    for (var j = slotStartIdx; j < adminData.length; j++) {
+      var curNo = String(adminData[j][0]).trim();
+      var curTim = String(adminData[j][1]).trim();
+
+      if (curNo === "" || isNaN(curNo)) {
+        break;
+      }
+
+      // Slot kosong ditemukan
+      if (curTim === "" || curTim === "-") {
+        targetSlotRow = j + 1;
+
+        // Isi Nama Tim di Kolom B
+        adminSheet.getRange(targetSlotRow, 2).setValue(namaTim);
+
+        // Isi Logo di Kolom C (Teks Link 'Logo Tim' yang ringan)
+        if (logoTimUrl.startsWith("http")) {
+          adminSheet.getRange(targetSlotRow, 3).setFormula('=HYPERLINK("' + logoTimUrl + '", "Logo Tim")');
+        } else {
+          adminSheet.getRange(targetSlotRow, 3).setValue("-");
+        }
+
+        adminData[j][1] = namaTim;
+        berhasilCount++;
+        break;
+      }
+    }
+
+    if (targetSlotRow === -1 && !pesanError && !sudahTerdaftar) {
+      pesanError = "Slot untuk sesi '" + rawSesi + "' sudah penuh";
+    }
+  }
+
+  if (berhasilCount > 0) {
+    return { sukses: true };
+  } else {
+    return { sukses: false, pesan: pesanError || "Gagal masuk slot" };
+  }
+}
+
+/**
+ * ============================================================================
+ * 5. PENCARIAN SESI PRESISI
+ * ============================================================================
+ */
+function cariBarisSesi(adminData, targetSesi) {
+  var cleanTarget = String(targetSesi).toUpperCase().replace(/:/g, ".");
+  
+  var matchJam = cleanTarget.match(/\b\d{1,2}\.\d{2}\b/);
+  if (!matchJam) return -1;
+  
+  var jamTarget = matchJam[0];
+  var jamFormatted = jamTarget.length === 4 ? "0" + jamTarget : jamTarget;
+
+  var isNight = cleanTarget.indexOf("NIGHT") !== -1;
+  var isDaily = cleanTarget.indexOf("DAILY") !== -1;
+
+  for (var i = 0; i < adminData.length; i++) {
+    var textBaris = (String(adminData[i][0]) + " " + String(adminData[i][1])).toUpperCase().replace(/:/g, ".");
+    
+    var hasJam = (textBaris.indexOf(jamTarget) !== -1 || textBaris.indexOf(jamFormatted) !== -1);
+    if (!hasJam) continue;
+
+    if (isNight && textBaris.indexOf("NIGHT") !== -1) {
+      return i;
+    }
+    if (isDaily && textBaris.indexOf("DAILY") !== -1 && textBaris.indexOf("NIGHT") === -1) {
+      return i;
+    }
+    if (!isNight && !isDaily) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+/**
+ * ============================================================================
+ * 6. HAPUS TIM DARI 'ADMIN LIVE' (JIKA STATUS OK DIHAPUS)
+ * ============================================================================
+ */
+function hapusTimDariAdminLive(dataSheet, row) {
+  var ss = dataSheet.getParent();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) return;
+
+  var namaTim = String(dataSheet.getRange(row, 3).getValue()).trim();
+  if (!namaTim || namaTim === "-") return;
+
+  var maxRows = Math.max(adminSheet.getLastRow(), 450);
+  var adminData = adminSheet.getRange(1, 1, maxRows, 3).getValues();
+  var adaDihapus = false;
+
+  for (var i = 0; i < adminData.length; i++) {
+    var curTim = String(adminData[i][1]).trim().toUpperCase();
+    var curNo = String(adminData[i][0]).trim();
+
+    if (!isNaN(curNo) && curNo !== "" && curTim === namaTim.toUpperCase()) {
+      var targetRow = i + 1;
+      adminSheet.getRange(targetRow, 2).clearContent();
+      adminSheet.getRange(targetRow, 3).clearContent();
+      adminData[i][1] = "";
+      adaDihapus = true;
+    }
+  }
+
+  if (adaDihapus) {
+    ss.toast("Tim '" + namaTim + "' dihapus dari ADMIN LIVE.", "Status Dihapus", 3);
+  }
+}
+
+/**
+ * ============================================================================
+ * 7. HELPER: AMBIL URL ASLI DARI HYPERLINK
+ * ============================================================================
+ */
+function ambilUrlDariCell(cellRange) {
+  var formula = cellRange.getFormula();
+  if (formula && formula.toUpperCase().indexOf("HYPERLINK") !== -1) {
+    var match = formula.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  var richText = cellRange.getRichTextValue();
+  if (richText && richText.getLinkUrl()) {
+    return richText.getLinkUrl().trim();
+  }
+
+  return String(cellRange.getValue()).trim();
+}
+
+/**
+ * ============================================================================
+ * 8. MENU: SINKRONKAN SEMUA YANG OK
+ * ============================================================================
+ */
+function prosesSemuaStatusOK() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dataSheet = ss.getSheetByName("DATA");
+  if (!dataSheet) return;
+
+  var lastRow = dataSheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var statusValues = dataSheet.getRange(2, 10, lastRow - 1, 1).getValues();
+  var count = 0;
+
+  for (var i = 0; i < statusValues.length; i++) {
+    var rawStatus = String(statusValues[i][0]).trim().toUpperCase();
+    var currentRow = i + 2;
+
+    if (rawStatus === "OK" || rawStatus.indexOf("OK") === 0) {
+      var res = masukkanTimKeAdminLive(dataSheet, currentRow);
+      if (res.sukses) {
+        dataSheet.getRange(currentRow, 10).setValue("OK (TERDAFTAR)");
+        count++;
+      }
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Selesai! " + count + " pendaftaran berhasil diproses ke ADMIN LIVE.");
+}
+
+/**
+ * ============================================================================
+ * 9. MENU: UBAH SEMUA LINK LAMA (DRIVE) JADI DIRECT LH3 (SUPER RINGAN)
+ * ============================================================================
+ */
+function rapikanLinkDataLama() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dataSheet = ss.getSheetByName("DATA");
+  if (!dataSheet) return;
+
+  var lastRow = dataSheet.getLastRow();
+  if (lastRow < 2) return;
+
+  for (var r = 2; r <= lastRow; r++) {
+    // 1. Ubah Kolom D (Logo Tim)
+    var cellLogo = dataSheet.getRange(r, 4);
+    var urlLogo = ambilUrlDariCell(cellLogo);
+    if (urlLogo.startsWith("http")) {
+      urlLogo = konversiKeDirectLh3(urlLogo);
+      cellLogo.setFormula('=HYPERLINK("' + urlLogo + '", "Logo Tim")');
+    }
+
+    // 2. Ubah Kolom I (Bukti TF) jadi Direct LH3 (Tidak berat lagi)
+    var cellBukti = dataSheet.getRange(r, 9);
+    var urlBukti = ambilUrlDariCell(cellBukti);
+    if (urlBukti.startsWith("http")) {
+      urlBukti = konversiKeDirectLh3(urlBukti);
+      cellBukti.setFormula('=HYPERLINK("' + urlBukti + '", "Bukti TF")');
+    }
+  }
+
+  SpreadsheetApp.getUi().alert("Berhasil! Semua Bukti TF dan Logo Tim telah diubah menjadi link direct LH3 (sangat ringan dan cepat dibuka).");
+}
+
+function konversiKeDirectLh3(url) {
+  if (!url) return "";
+  if (url.indexOf("lh3.googleusercontent.com") !== -1) return url;
+  
+  var match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return "https://lh3.googleusercontent.com/d/" + match[1];
+  }
+  return url;
+}
+
+/**
+ * ============================================================================
+ * 10. MENU: BERSIHKAN DATA NYASAR DI SESI 10.00
+ * ============================================================================
+ */
+function bersihkanSesiSepuluh() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var adminSheet = ss.getSheetByName("ADMIN LIVE");
+  if (!adminSheet) return;
+
+  adminSheet.getRange(3, 2, 15, 2).clearContent();
+  SpreadsheetApp.getUi().alert("Sesi 10.00 sudah bersih kembali!");
+}
+
 
 
 
@@ -394,6 +1657,7 @@
     ================================================================================
 -->
 <html lang="id" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -423,7 +1687,7 @@
             --radius: 16px;
             --radius-sm: 8px;
             --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            --body-gradient: 
+            --body-gradient:
                 radial-gradient(ellipse at 10% 20%, rgba(255, 68, 68, 0.08) 0%, transparent 50%),
                 radial-gradient(ellipse at 90% 80%, rgba(77, 124, 255, 0.08) 0%, transparent 50%),
                 radial-gradient(ellipse at 50% 50%, rgba(255, 215, 0, 0.03) 0%, transparent 70%);
@@ -447,13 +1711,17 @@
             --error: #dc2626;
             --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
             --shadow-glow: 0 0 30px rgba(255, 51, 68, 0.15);
-            --body-gradient: 
+            --body-gradient:
                 radial-gradient(ellipse at 10% 20%, rgba(255, 68, 68, 0.05) 0%, transparent 50%),
                 radial-gradient(ellipse at 90% 80%, rgba(37, 99, 235, 0.05) 0%, transparent 50%),
                 radial-gradient(ellipse at 50% 50%, rgba(217, 119, 6, 0.02) 0%, transparent 70%);
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -469,7 +1737,12 @@
             transition: background-color 0.3s ease, color 0.3s ease;
         }
 
-        .container { width: 100%; max-width: 720px; margin: 0 auto; position: relative; }
+        .container {
+            width: 100%;
+            max-width: 720px;
+            margin: 0 auto;
+            position: relative;
+        }
 
         /* ==================== TOP BAR CONTROLS (POJOK KANAN ATAS) ==================== */
         .top-action-bar {
@@ -526,7 +1799,9 @@
             animation: fadeIn 0.2s ease;
         }
 
-        .lang-menu.show { display: flex; }
+        .lang-menu.show {
+            display: flex;
+        }
 
         .lang-item {
             display: flex;
@@ -575,146 +1850,384 @@
         }
 
         /* STEP INDICATOR (PERSIS WEB 1) */
-        .step-indicator { display: flex; justify-content: center; align-items: center; gap: 0; margin-bottom: 30px; position: relative; }
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0;
+            margin-bottom: 30px;
+            position: relative;
+        }
+
         .step-dot {
-            width: 48px; height: 48px; border-radius: 50%;
-            background: var(--bg-card); border: 3px solid var(--border-color);
-            display: flex; align-items: center; justify-content: center;
-            font-weight: bold; font-size: 1.1rem; color: var(--text-muted);
-            transition: all var(--transition); position: relative; z-index: 2;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            border: 3px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            transition: all var(--transition);
+            position: relative;
+            z-index: 2;
             font-family: 'Courier New', monospace;
         }
+
         .step-dot.active {
-            background: var(--accent); border-color: var(--accent); color: #fff;
-            box-shadow: 0 0 30px rgba(255, 68, 68, 0.5); animation: pulse-glow 2s infinite;
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+            box-shadow: 0 0 30px rgba(255, 68, 68, 0.5);
+            animation: pulse-glow 2s infinite;
         }
-        .step-dot.completed { background: var(--success); border-color: var(--success); color: #fff; }
-        .step-line { flex: 1; max-width: 120px; height: 4px; background: var(--border-color); border-radius: 2px; transition: all var(--transition); }
-        .step-line.completed { background: var(--success); }
+
+        .step-dot.completed {
+            background: var(--success);
+            border-color: var(--success);
+            color: #fff;
+        }
+
+        .step-line {
+            flex: 1;
+            max-width: 120px;
+            height: 4px;
+            background: var(--border-color);
+            border-radius: 2px;
+            transition: all var(--transition);
+        }
+
+        .step-line.completed {
+            background: var(--success);
+        }
+
         .step-label {
-            position: absolute; bottom: -28px; font-size: 0.7rem;
-            text-transform: uppercase; letter-spacing: 1px;
-            color: var(--text-muted); white-space: nowrap; font-weight: 600;
+            position: absolute;
+            bottom: -28px;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            font-weight: 600;
         }
-        .step-label.active { color: var(--accent); }
-        .step-label.completed { color: var(--success); }
+
+        .step-label.active {
+            color: var(--accent);
+        }
+
+        .step-label.completed {
+            color: var(--success);
+        }
+
         @keyframes pulse-glow {
-            0%, 100% { box-shadow: 0 0 30px rgba(255, 68, 68, 0.5); }
-            50% { box-shadow: 0 0 50px rgba(255, 68, 68, 0.8); }
+
+            0%,
+            100% {
+                box-shadow: 0 0 30px rgba(255, 68, 68, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 50px rgba(255, 68, 68, 0.8);
+            }
         }
 
         .card {
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            border-radius: var(--radius); padding: 32px 28px;
-            box-shadow: var(--shadow); backdrop-filter: blur(10px); transition: all var(--transition);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 32px 28px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(10px);
+            transition: all var(--transition);
         }
-        .card:hover { border-color: rgba(255, 68, 68, 0.3); box-shadow: var(--shadow-glow); }
 
-        .header { text-align: center; margin-bottom: 28px; }
+        .card:hover {
+            border-color: rgba(255, 68, 68, 0.3);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
         .header .badge {
             display: inline-block;
             background: linear-gradient(135deg, var(--accent), var(--accent-glow));
-            color: #fff; padding: 6px 20px; border-radius: 50px;
-            font-size: 0.75rem; font-weight: 700; letter-spacing: 2px;
-            text-transform: uppercase; margin-bottom: 12px;
+            color: #fff;
+            padding: 6px 20px;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
             box-shadow: 0 4px 20px rgba(255, 68, 68, 0.4);
         }
+
         .header h1 {
-            font-size: 1.8rem; font-weight: 900; letter-spacing: 1px;
+            font-size: 1.8rem;
+            font-weight: 900;
+            letter-spacing: 1px;
             background: linear-gradient(135deg, var(--text-primary) 0%, var(--gold) 50%, var(--accent) 100%);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            background-clip: text; line-height: 1.2; text-transform: uppercase;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1.2;
+            text-transform: uppercase;
         }
-        .header .subtitle { color: var(--text-secondary); font-size: 0.9rem; margin-top: 6px; }
 
-        .session-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+        .header .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 6px;
+        }
+
+        .session-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
         .session-card {
-            background: var(--bg-secondary); border: 2px solid var(--border-color);
-            border-radius: var(--radius-sm); padding: 16px; text-align: center;
-            position: relative; overflow: hidden; user-select: none;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            user-select: none;
         }
-        .session-card .session-type {
-            font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px;
-            font-weight: 700; padding: 3px 10px; border-radius: 50px;
-            display: inline-block; margin-bottom: 6px;
-        }
-        .session-card .session-type.daily { background: rgba(77, 124, 255, 0.2); color: #7da3ff; }
-        .session-card .session-type.night { background: rgba(255, 215, 0, 0.2); color: var(--gold); }
-        .session-card .session-price { font-size: 1.15rem; font-weight: 800; color: var(--text-primary); }
-        .session-card .session-price span { font-size: 0.7rem; color: var(--text-muted); font-weight: 400; }
 
-        .session-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 22px; }
-        .session-time-item {
-            display: flex; align-items: center; gap: 10px;
-            background: var(--bg-secondary); border: 2px solid var(--border-color);
-            border-radius: var(--radius-sm); padding: 12px 14px;
-            cursor: pointer; transition: all var(--transition); user-select: none;
+        .session-card .session-type {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 50px;
+            display: inline-block;
+            margin-bottom: 6px;
         }
-        .session-time-item:hover { border-color: rgba(255, 255, 255, 0.25); }
+
+        .session-card .session-type.daily {
+            background: rgba(77, 124, 255, 0.2);
+            color: #7da3ff;
+        }
+
+        .session-card .session-type.night {
+            background: rgba(255, 215, 0, 0.2);
+            color: var(--gold);
+        }
+
+        .session-card .session-price {
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+
+        .session-card .session-price span {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .session-times {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 22px;
+        }
+
+        .session-time-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 12px 14px;
+            cursor: pointer;
+            transition: all var(--transition);
+            user-select: none;
+        }
+
+        .session-time-item:hover {
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
         .session-time-item.selected {
-            border-color: var(--accent); background: rgba(255, 68, 68, 0.08);
+            border-color: var(--accent);
+            background: rgba(255, 68, 68, 0.08);
             box-shadow: 0 0 20px rgba(255, 68, 68, 0.15);
         }
+
         .session-time-item .time-badge {
-            font-weight: 800; font-size: 0.95rem; letter-spacing: 0.5px;
-            min-width: 55px; color: var(--text-primary);
+            font-weight: 800;
+            font-size: 0.95rem;
+            letter-spacing: 0.5px;
+            min-width: 55px;
+            color: var(--text-primary);
         }
+
         .session-time-item .tag {
-            font-size: 0.6rem; text-transform: uppercase; font-weight: 700;
-            letter-spacing: 0.5px; padding: 2px 8px; border-radius: 50px; white-space: nowrap;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            padding: 2px 8px;
+            border-radius: 50px;
+            white-space: nowrap;
         }
-        .session-time-item .tag.daily { background: rgba(77, 124, 255, 0.2); color: #7da3ff; }
-        .session-time-item .tag.night { background: rgba(255, 215, 0, 0.2); color: var(--gold); }
-        .session-time-item .price-tag { margin-left: auto; font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
+
+        .session-time-item .tag.daily {
+            background: rgba(77, 124, 255, 0.2);
+            color: #7da3ff;
+        }
+
+        .session-time-item .tag.night {
+            background: rgba(255, 215, 0, 0.2);
+            color: var(--gold);
+        }
+
+        .session-time-item .price-tag {
+            margin-left: auto;
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
         .session-time-item .check-icon {
-            width: 20px; height: 20px; border: 2px solid var(--text-muted);
-            border-radius: 4px; display: flex; align-items: center; justify-content: center;
-            font-size: 0.6rem; transition: all var(--transition); flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--text-muted);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            transition: all var(--transition);
+            flex-shrink: 0;
         }
-        .session-time-item.selected .check-icon { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+        .session-time-item.selected .check-icon {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
 
         /* Sesi FULL */
         .session-time-item.full {
-            opacity: 0.55; cursor: not-allowed;
+            opacity: 0.55;
+            cursor: not-allowed;
             border-color: rgba(255, 82, 82, 0.5);
             background: rgba(255, 82, 82, 0.05);
         }
-        .session-time-item.full:hover { border-color: rgba(255, 82, 82, 0.5); }
-        .session-time-item.full .price-tag { font-size: 0; color: var(--error); }
-        .session-time-item.full .price-tag::before {
-            content: 'FULL'; font-size: 0.85rem; font-weight: 800; letter-spacing: 1px;
+
+        .session-time-item.full:hover {
+            border-color: rgba(255, 82, 82, 0.5);
         }
-        .session-time-item.full .check-icon { opacity: 0.3; border-color: var(--error); }
+
+        .session-time-item.full .price-tag {
+            font-size: 0;
+            color: var(--error);
+        }
+
+        .session-time-item.full .price-tag::before {
+            content: 'FULL';
+            font-size: 0.85rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+        }
+
+        .session-time-item.full .check-icon {
+            opacity: 0.3;
+            border-color: var(--error);
+        }
 
         .info-note {
-            background: rgba(255, 215, 0, 0.08); border: 1px solid rgba(255, 215, 0, 0.3);
-            border-radius: var(--radius-sm); padding: 12px 16px; font-size: 0.85rem;
-            color: var(--gold); display: flex; align-items: center; gap: 10px; margin-bottom: 20px;
+            background: rgba(255, 215, 0, 0.08);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: var(--radius-sm);
+            padding: 12px 16px;
+            font-size: 0.85rem;
+            color: var(--gold);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
         }
-        .info-note .icon { font-size: 1.2rem; flex-shrink: 0; }
 
-        .form-group { margin-bottom: 16px; }
+        .info-note .icon {
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
         .form-group label {
-            display: block; font-size: 0.8rem; font-weight: 700;
-            text-transform: uppercase; letter-spacing: 1px;
-            color: var(--text-secondary); margin-bottom: 6px;
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
         }
-        .form-group label .required { color: var(--accent); }
+
+        .form-group label .required {
+            color: var(--accent);
+        }
+
         .form-input {
-            width: 100%; padding: 12px 16px; background: var(--bg-secondary);
-            border: 2px solid var(--border-color); border-radius: var(--radius-sm);
-            color: var(--text-primary); font-size: 0.95rem;
-            transition: all var(--transition); outline: none; font-family: inherit;
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            transition: all var(--transition);
+            outline: none;
+            font-family: inherit;
         }
+
         .form-input:focus {
             border-color: var(--accent);
             box-shadow: 0 0 20px rgba(255, 68, 68, 0.2);
             background: rgba(255, 68, 68, 0.03);
         }
-        .form-input::placeholder { color: var(--text-muted); font-size: 0.85rem; }
-        .form-input.error { border-color: var(--error); box-shadow: 0 0 20px rgba(255, 82, 82, 0.2); }
-        .error-message { font-size: 0.75rem; color: var(--error); margin-top: 4px; display: none; }
-        .error-message.show { display: block; animation: fadeIn 0.3s ease; }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .form-input.error {
+            border-color: var(--error);
+            box-shadow: 0 0 20px rgba(255, 82, 82, 0.2);
+        }
+
+        .error-message {
+            font-size: 0.75rem;
+            color: var(--error);
+            margin-top: 4px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
 
         /* ==================== 2-COLUMN GRID IDENTITAS TIM ==================== */
         .team-identity-grid {
@@ -736,15 +2249,18 @@
             cursor: pointer;
             transition: all var(--transition);
         }
+
         .team-logo-compact:hover {
             border-color: var(--accent);
             background: rgba(255, 68, 68, 0.03);
         }
+
         .team-logo-compact.error {
             border-color: var(--error) !important;
             background: rgba(255, 82, 82, 0.08) !important;
             box-shadow: 0 0 16px rgba(255, 82, 82, 0.2) !important;
         }
+
         .logo-preview-box {
             width: 36px;
             height: 36px;
@@ -757,13 +2273,19 @@
             overflow: hidden;
             flex-shrink: 0;
         }
+
         .logo-preview-box img {
             width: 100%;
             height: 100%;
             object-fit: cover;
             display: none;
         }
-        .logo-info { flex: 1; min-width: 0; }
+
+        .logo-info {
+            flex: 1;
+            min-width: 0;
+        }
+
         .logo-title {
             font-size: 0.8rem;
             font-weight: 700;
@@ -772,6 +2294,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
         .logo-sub {
             font-size: 0.65rem;
             color: var(--text-muted);
@@ -779,6 +2302,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+
         .btn-mini-logo {
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid var(--border-color);
@@ -790,133 +2314,316 @@
             cursor: pointer;
             white-space: nowrap;
         }
-        .btn-mini-logo:hover { background: var(--accent); color: #fff; }
+
+        .btn-mini-logo:hover {
+            background: var(--accent);
+            color: #fff;
+        }
 
         .total-display {
             background: linear-gradient(135deg, rgba(255, 68, 68, 0.1), rgba(255, 215, 0, 0.05));
-            border: 2px solid rgba(255, 68, 68, 0.3); border-radius: var(--radius-sm);
-            padding: 16px 20px; display: flex; justify-content: space-between;
-            align-items: center; margin-bottom: 20px;
+            border: 2px solid rgba(255, 68, 68, 0.3);
+            border-radius: var(--radius-sm);
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
         }
-        .total-display .label { font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; }
-        .total-display .amount { font-size: 1.5rem; font-weight: 900; color: var(--gold); letter-spacing: 0.5px; }
+
+        .total-display .label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .total-display .amount {
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--gold);
+            letter-spacing: 0.5px;
+        }
 
         .btn {
-            width: 100%; padding: 16px 24px; border: none; border-radius: var(--radius-sm);
-            font-size: 1rem; font-weight: 800; text-transform: uppercase;
-            letter-spacing: 1.5px; cursor: pointer; transition: all var(--transition);
-            position: relative; overflow: hidden; font-family: inherit;
+            width: 100%;
+            padding: 16px 24px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 1rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            cursor: pointer;
+            transition: all var(--transition);
+            position: relative;
+            overflow: hidden;
+            font-family: inherit;
         }
+
         .btn-primary {
             background: linear-gradient(135deg, var(--accent), var(--accent-glow));
-            color: #fff; box-shadow: 0 8px 30px rgba(255, 68, 68, 0.4);
+            color: #fff;
+            box-shadow: 0 8px 30px rgba(255, 68, 68, 0.4);
         }
+
         .btn-primary:hover:not(:disabled) {
             transform: translateY(-3px);
             box-shadow: 0 12px 40px rgba(255, 68, 68, 0.6);
             background: linear-gradient(135deg, #ff5555, #ff7b45);
         }
+
         .btn-primary:disabled {
-            background: var(--border-color); color: var(--text-muted);
-            cursor: not-allowed; box-shadow: none; transform: none;
+            background: var(--border-color);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
         }
+
         .btn-green {
             background: linear-gradient(135deg, #25d366, #128c7e);
-            color: #fff; box-shadow: 0 8px 30px rgba(37, 211, 102, 0.4);
+            color: #fff;
+            box-shadow: 0 8px 30px rgba(37, 211, 102, 0.4);
         }
-        .btn-green:hover { transform: translateY(-3px); box-shadow: 0 12px 40px rgba(37, 211, 102, 0.6); }
-        .btn-secondary {
-            background: var(--bg-secondary); color: var(--text-primary);
-            border: 2px solid var(--border-color); box-shadow: none;
-        }
-        .btn-secondary:hover { border-color: var(--text-muted); transform: translateY(-2px); }
 
-        .qris-container { display: flex; flex-direction: column; align-items: center; margin: 20px 0; }
-        .qris-frame {
-            background: #fff; padding: 20px; border-radius: 12px;
-            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
-            max-width: 280px; width: 100%; text-align: center; margin-bottom: 12px;
+        .btn-green:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 40px rgba(37, 211, 102, 0.6);
         }
-        .qris-frame img { width: 100%; height: auto; border-radius: 6px; display: block; }
-        .qris-caption { font-size: 0.75rem; color: var(--text-muted); text-align: center; }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 2px solid var(--border-color);
+            box-shadow: none;
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--text-muted);
+            transform: translateY(-2px);
+        }
+
+        .qris-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 20px 0;
+        }
+
+        .qris-frame {
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+            max-width: 280px;
+            width: 100%;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        .qris-frame img {
+            width: 100%;
+            height: auto;
+            border-radius: 6px;
+            display: block;
+        }
+
+        .qris-caption {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
 
         .payment-amount-display {
-            text-align: center; margin: 16px 0; padding: 20px;
-            background: var(--bg-secondary); border-radius: var(--radius-sm);
+            text-align: center;
+            margin: 16px 0;
+            padding: 20px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-sm);
             border: 2px solid var(--border-color);
         }
+
         .payment-amount-display .label {
-            font-size: 0.8rem; color: var(--text-secondary);
-            text-transform: uppercase; letter-spacing: 1px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
+
         .payment-amount-display .amount {
-            font-size: 2.2rem; font-weight: 900; color: var(--gold);
-            letter-spacing: 1px; margin: 4px 0;
+            font-size: 2.2rem;
+            font-weight: 900;
+            color: var(--gold);
+            letter-spacing: 1px;
+            margin: 4px 0;
         }
 
         .transaction-id {
-            display: flex; align-items: center; justify-content: center; gap: 10px;
-            background: rgba(255, 215, 0, 0.08); border: 1px dashed rgba(255, 215, 0, 0.5);
-            border-radius: var(--radius-sm); padding: 12px 16px; margin-bottom: 16px;
-            font-family: 'Courier New', monospace; font-size: 1.1rem; font-weight: 700;
-            color: var(--gold); letter-spacing: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: rgba(255, 215, 0, 0.08);
+            border: 1px dashed rgba(255, 215, 0, 0.5);
+            border-radius: var(--radius-sm);
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--gold);
+            letter-spacing: 2px;
         }
+
         .transaction-id .copy-btn {
-            background: none; border: 1px solid rgba(255, 215, 0, 0.4);
-            color: var(--gold); padding: 4px 10px; border-radius: 4px;
-            cursor: pointer; font-size: 0.7rem; transition: all var(--transition);
+            background: none;
+            border: 1px solid rgba(255, 215, 0, 0.4);
+            color: var(--gold);
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            transition: all var(--transition);
         }
-        .transaction-id .copy-btn:hover { background: rgba(255, 215, 0, 0.15); }
+
+        .transaction-id .copy-btn:hover {
+            background: rgba(255, 215, 0, 0.15);
+        }
+
         .transaction-note {
-            text-align: center; font-size: 0.82rem; color: var(--gold);
-            margin-top: -8px; margin-bottom: 16px; opacity: 0.9;
+            text-align: center;
+            font-size: 0.82rem;
+            color: var(--gold);
+            margin-top: -8px;
+            margin-bottom: 16px;
+            opacity: 0.9;
         }
 
         .upload-area {
-            border: 3px dashed var(--border-color); border-radius: var(--radius-sm);
-            padding: 32px 20px; text-align: center; cursor: pointer;
-            transition: all var(--transition); margin-bottom: 16px; position: relative;
+            border: 3px dashed var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 32px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all var(--transition);
+            margin-bottom: 16px;
+            position: relative;
         }
-        .upload-area:hover { border-color: var(--accent); background: rgba(255, 68, 68, 0.03); }
+
+        .upload-area:hover {
+            border-color: var(--accent);
+            background: rgba(255, 68, 68, 0.03);
+        }
+
         .upload-area.error {
             border-color: var(--error) !important;
             background: rgba(255, 82, 82, 0.08) !important;
             box-shadow: 0 0 16px rgba(255, 82, 82, 0.3) !important;
         }
-        .upload-area .upload-icon { font-size: 3rem; margin-bottom: 10px; display: block; }
-        .upload-area .upload-text { font-size: 0.9rem; color: var(--text-secondary); font-weight: 600; }
-        .upload-area .upload-hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
-        .upload-area input[type="file"] { display: none; }
-        .upload-preview { display: none; text-align: center; }
-        .upload-preview img {
-            max-width: 100%; max-height: 200px; border-radius: var(--radius-sm);
-            border: 2px solid var(--border-color); margin-bottom: 8px;
+
+        .upload-area .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            display: block;
         }
-        .upload-preview .file-name { font-size: 0.8rem; color: var(--text-secondary); word-break: break-all; }
+
+        .upload-area .upload-text {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .upload-area .upload-hint {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .upload-area input[type="file"] {
+            display: none;
+        }
+
+        .upload-preview {
+            display: none;
+            text-align: center;
+        }
+
+        .upload-preview img {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: var(--radius-sm);
+            border: 2px solid var(--border-color);
+            margin-bottom: 8px;
+        }
+
+        .upload-preview .file-name {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
         .upload-preview .remove-file {
-            background: var(--error); color: #fff; border: none;
-            padding: 6px 14px; border-radius: 4px; cursor: pointer;
-            font-size: 0.75rem; margin-top: 8px; font-weight: 600;
+            background: var(--error);
+            color: #fff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            margin-top: 8px;
+            font-weight: 600;
         }
 
         .success-box {
-            background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color);
-            border-radius: var(--radius-sm); padding: 14px 18px; margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 14px 18px;
+            margin-bottom: 20px;
             text-align: left;
         }
+
         .success-row {
-            display: flex; justify-content: space-between; align-items: center; padding: 8px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
             border-bottom: 1px solid var(--border-color);
         }
-        .success-row:last-child { border-bottom: none; }
-        .success-label { color: var(--text-secondary); font-size: 0.85rem; }
-        .success-val { font-weight: 600; font-size: 0.95rem; }
 
-        .step-content { display: none; animation: fadeIn 0.4s ease; }
-        .step-content.active { display: block; }
+        .success-row:last-child {
+            border-bottom: none;
+        }
+
+        .success-label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .success-val {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .step-content {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .step-content.active {
+            display: block;
+        }
+
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         /* BRAND LOGO PAPIH GAMING */
@@ -926,6 +2633,7 @@
             align-items: center;
             margin-bottom: 16px;
         }
+
         .brand-logo {
             width: 88px;
             height: 88px;
@@ -937,28 +2645,79 @@
             transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             user-select: none;
         }
+
         .brand-logo:hover {
             transform: scale(1.06);
             box-shadow: 0 0 35px rgba(255, 68, 68, 0.8), 0 0 60px rgba(251, 191, 36, 0.35);
         }
 
         @media (max-width: 600px) {
-            .card { padding: 18px 14px; border-radius: 18px; }
-            .header h1 { font-size: 1.35rem; }
-            .team-identity-grid { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-            .form-input { padding: 10px 10px; font-size: 0.85rem; }
-            .team-logo-compact { padding: 5px 8px; height: 44px; gap: 6px; }
-            .logo-preview-box { width: 28px; height: 28px; }
-            .logo-title { font-size: 0.7rem; }
-            .logo-sub { display: none; }
-            .btn-mini-logo { padding: 3px 6px; font-size: 0.65rem; }
-            .session-cards { grid-template-columns: 1fr 1fr; gap: 8px; }
-            .session-card { padding: 12px 8px; }
-            .session-times { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
-            .session-time-item { padding: 10px; gap: 6px; }
+            .card {
+                padding: 18px 14px;
+                border-radius: 18px;
+            }
+
+            .header h1 {
+                font-size: 1.35rem;
+            }
+
+            .team-identity-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                margin-bottom: 8px;
+            }
+
+            .form-input {
+                padding: 10px 10px;
+                font-size: 0.85rem;
+            }
+
+            .team-logo-compact {
+                padding: 5px 8px;
+                height: 44px;
+                gap: 6px;
+            }
+
+            .logo-preview-box {
+                width: 28px;
+                height: 28px;
+            }
+
+            .logo-title {
+                font-size: 0.7rem;
+            }
+
+            .logo-sub {
+                display: none;
+            }
+
+            .btn-mini-logo {
+                padding: 3px 6px;
+                font-size: 0.65rem;
+            }
+
+            .session-cards {
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+
+            .session-card {
+                padding: 12px 8px;
+            }
+
+            .session-times {
+                grid-template-columns: repeat(2, 1fr) !important;
+                gap: 8px !important;
+            }
+
+            .session-time-item {
+                padding: 10px;
+                gap: 6px;
+            }
         }
     </style>
 </head>
+
 <body>
 
     <!-- ==================== SECURITY & SOURCE-CODE DEFENSE ==================== -->
@@ -966,9 +2725,9 @@
         document.addEventListener('contextmenu', e => e.preventDefault());
         document.addEventListener('keydown', e => {
             if (
-                e.keyCode === 123 || 
-                (e.ctrlKey && e.keyCode === 85) || 
-                (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) || 
+                e.keyCode === 123 ||
+                (e.ctrlKey && e.keyCode === 85) ||
+                (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) ||
                 (e.ctrlKey && e.keyCode === 83)
             ) {
                 e.preventDefault();
@@ -978,13 +2737,14 @@
     </script>
 
     <div class="container" id="appContainer">
-        
+
         <!-- ==================== POJOK KANAN ATAS: BAHASA (🌐) & TEMA (🌙/☀️) ==================== -->
         <div class="top-action-bar">
             <!-- Globe Language Dropdown -->
             <div class="lang-dropdown-wrapper" id="langDropdownWrapper">
                 <button type="button" class="lang-globe-btn" id="langGlobeBtn" onclick="toggleLangDropdown()">
-                    <span>🌐</span> <span id="currentLangLabel">ID</span> <span style="font-size:0.6rem; opacity:0.7;">▼</span>
+                    <span>🌐</span> <span id="currentLangLabel">ID</span> <span
+                        style="font-size:0.6rem; opacity:0.7;">▼</span>
                 </button>
                 <div class="lang-menu" id="langMenu">
                     <div class="lang-item active" data-lang="id" onclick="selectLang('id')">🇮🇩 Indonesia</div>
@@ -998,7 +2758,8 @@
             </div>
 
             <!-- Dark / Light Mode Toggle -->
-            <button type="button" class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Ganti Tema">
+            <button type="button" class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()"
+                title="Ganti Tema">
                 🌙
             </button>
         </div>
@@ -1007,13 +2768,16 @@
         <div class="step-indicator" id="stepIndicator">
             <div style="display:flex;align-items:center;gap:0;position:relative;">
                 <div class="step-dot active" id="stepDot1">1</div>
-                <span class="step-label active" style="position:static;margin:0 6px;font-size:0.65rem;" data-i18n="step1Label">Registrasi</span>
+                <span class="step-label active" style="position:static;margin:0 6px;font-size:0.65rem;"
+                    data-i18n="step1Label">Registrasi</span>
                 <div class="step-line" id="stepLine1"></div>
                 <div class="step-dot" id="stepDot2">2</div>
-                <span class="step-label" style="position:static;margin:0 6px;font-size:0.65rem;" id="stepLabel2" data-i18n="step2Label">Pembayaran</span>
+                <span class="step-label" style="position:static;margin:0 6px;font-size:0.65rem;" id="stepLabel2"
+                    data-i18n="step2Label">Pembayaran</span>
                 <div class="step-line" id="stepLine2"></div>
                 <div class="step-dot" id="stepDot3">3</div>
-                <span class="step-label" style="position:static;margin:0 6px;font-size:0.65rem;" id="stepLabel3" data-i18n="step3Label">Selesai</span>
+                <span class="step-label" style="position:static;margin:0 6px;font-size:0.65rem;" id="stepLabel3"
+                    data-i18n="step3Label">Selesai</span>
             </div>
         </div>
 
@@ -1033,18 +2797,21 @@
                     <div class="session-card" id="infoDaily">
                         <div class="session-type daily" data-i18n="cardDailyTitle">⚡ DAILY SCRIM</div>
                         <div class="session-price">Rp 5.000 <span data-i18n="perSession">/ sesi</span></div>
-                        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;" data-i18n="poolDaily">Pool Prize: Rp 35.000<br />+ Challenge</div>
+                        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;" data-i18n="poolDaily">Pool
+                            Prize: Rp 35.000<br />+ Challenge</div>
                     </div>
                     <div class="session-card" id="infoNight">
                         <div class="session-type night" data-i18n="cardNightTitle">🌙 NIGHT SCRIM</div>
                         <div class="session-price">Rp 10.000 <span data-i18n="perSession">/ sesi</span></div>
-                        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;" data-i18n="poolNight">Pool Prize: Rp 100.000<br />+ Challenge</div>
+                        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;" data-i18n="poolNight">Pool
+                            Prize: Rp 100.000<br />+ Challenge</div>
                     </div>
                 </div>
 
                 <div class="info-note">
                     <span class="icon">📌</span>
-                    <span data-i18n="noteMultiSession"><strong>Boleh daftar lebih dari 1 sesi!</strong> Pilih semua sesi yang kamu inginkan.</span>
+                    <span data-i18n="noteMultiSession"><strong>Boleh daftar lebih dari 1 sesi!</strong> Pilih semua sesi
+                        yang kamu inginkan.</span>
                 </div>
 
                 <!-- 2-COLUMN GRID IDENTITAS TIM -->
@@ -1052,16 +2819,19 @@
                     <!-- Baris 1 Kiri: Nama Tim -->
                     <div class="form-group" style="margin-bottom:0;">
                         <label><span data-i18n="lblTeam">Nama Tim</span> <span class="required">*</span></label>
-                        <input type="text" class="form-input" id="teamName" placeholder="Masukkan nama tim..." autocomplete="off" />
+                        <input type="text" class="form-input" id="teamName" placeholder="Masukkan nama tim..."
+                            autocomplete="off" />
                         <div class="error-message" id="teamNameError" data-i18n="errTeam">Nama tim wajib diisi!</div>
                     </div>
 
                     <!-- Baris 1 Kanan: Logo Tim -->
                     <div class="form-group" style="margin-bottom:0;">
                         <label><span data-i18n="lblLogo">Logo Tim</span> <span class="required">*</span></label>
-                        <input type="file" id="teamLogoFile" accept="image/png, image/jpeg, image/jpg" style="display:none;" onchange="handleTeamLogoSelect(event)">
-                        
-                        <div class="team-logo-compact" id="teamLogoRow" onclick="document.getElementById('teamLogoFile').click()">
+                        <input type="file" id="teamLogoFile" accept="image/png, image/jpeg, image/jpg"
+                            style="display:none;" onchange="handleTeamLogoSelect(event)">
+
+                        <div class="team-logo-compact" id="teamLogoRow"
+                            onclick="document.getElementById('teamLogoFile').click()">
                             <div class="logo-preview-box">
                                 <span id="logoPlaceholder" style="font-size:1.2rem;">🛡️</span>
                                 <img id="logoPreviewImg" alt="Preview Logo">
@@ -1070,24 +2840,32 @@
                                 <div class="logo-title" id="logoUploadTitle" data-i18n="logoPrompt">Pilih Logo</div>
                                 <div class="logo-sub" data-i18n="logoHint">PNG/JPG (Maks 5MB)</div>
                             </div>
-                            <button type="button" class="btn-mini-logo" id="btnPickLogo" data-i18n="btnPick">Pilih</button>
-                            <button type="button" class="btn-mini-logo" id="btnDeleteLogo" style="display:none;background:var(--error);color:#fff;" onclick="removeTeamLogo(event)">✕</button>
+                            <button type="button" class="btn-mini-logo" id="btnPickLogo"
+                                data-i18n="btnPick">Pilih</button>
+                            <button type="button" class="btn-mini-logo" id="btnDeleteLogo"
+                                style="display:none;background:var(--error);color:#fff;"
+                                onclick="removeTeamLogo(event)">✕</button>
                         </div>
-                        <div class="error-message" id="teamLogoError" data-i18n="errLogo">Logo tim wajib di-upload!</div>
+                        <div class="error-message" id="teamLogoError" data-i18n="errLogo">Logo tim wajib di-upload!
+                        </div>
                     </div>
 
                     <!-- Baris 2 Kiri: Nick Kapten -->
                     <div class="form-group" style="margin-bottom:0;">
                         <label><span data-i18n="lblCapt">Nick Kapten</span> <span class="required">*</span></label>
-                        <input type="text" class="form-input" id="captainNick" placeholder="Masukkan nick kapten..." autocomplete="off" />
-                        <div class="error-message" id="captainNickError" data-i18n="errCapt">Nick kapten wajib diisi!</div>
+                        <input type="text" class="form-input" id="captainNick" placeholder="Masukkan nick kapten..."
+                            autocomplete="off" />
+                        <div class="error-message" id="captainNickError" data-i18n="errCapt">Nick kapten wajib diisi!
+                        </div>
                     </div>
 
                     <!-- Baris 2 Kanan: Nomor WhatsApp -->
                     <div class="form-group" style="margin-bottom:0;">
                         <label><span data-i18n="lblWA">Nomor WhatsApp</span> <span class="required">*</span></label>
-                        <input type="tel" class="form-input" id="whatsappNumber" placeholder="Contoh: 081234567890" autocomplete="off" maxlength="16" />
-                        <div class="error-message" id="whatsappError" data-i18n="errWA">Nomor WA wajib diisi dengan format angka!</div>
+                        <input type="tel" class="form-input" id="whatsappNumber" placeholder="Contoh: 081234567890"
+                            autocomplete="off" maxlength="16" />
+                        <div class="error-message" id="whatsappError" data-i18n="errWA">Nomor WA wajib diisi dengan
+                            format angka!</div>
                     </div>
                 </div>
 
@@ -1172,7 +2950,8 @@
                             <span class="tag daily">DAILY SCRIM</span><span class="price-tag">5K</span>
                         </div>
                     </div>
-                    <div class="error-message" id="sessionError" style="margin-top:6px;" data-i18n="errMinOne">Minimal pilih 1 sesi!</div>
+                    <div class="error-message" id="sessionError" style="margin-top:6px;" data-i18n="errMinOne">Minimal
+                        pilih 1 sesi!</div>
                 </div>
 
                 <div class="total-display">
@@ -1196,8 +2975,10 @@
                 </div>
 
                 <!-- Preview Logo & Nama Tim -->
-                <div style="display:flex;align-items:center;gap:12px;background:var(--bg-secondary);padding:12px 16px;border-radius:var(--radius-sm);border:1px solid var(--border-color);margin-bottom:16px;">
-                    <img id="step2TeamLogo" src="" alt="Logo" style="width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--accent);">
+                <div
+                    style="display:flex;align-items:center;gap:12px;background:var(--bg-secondary);padding:12px 16px;border-radius:var(--radius-sm);border:1px solid var(--border-color);margin-bottom:16px;">
+                    <img id="step2TeamLogo" src="" alt="Logo"
+                        style="width:40px;height:40px;border-radius:6px;object-fit:cover;border:1px solid var(--accent);">
                     <div>
                         <div id="step2TeamName" style="font-weight:700;font-size:0.95rem;">-</div>
                         <div id="step2Captain" style="font-size:0.75rem;color:var(--text-muted);">-</div>
@@ -1208,7 +2989,8 @@
                     <div class="qris-frame">
                         <img src="" alt="QRIS Papih Gaming" id="qrisImage">
                     </div>
-                    <div class="qris-caption" data-i18n="qrisCaption">Scan QRIS di atas menggunakan aplikasi pembayaran</div>
+                    <div class="qris-caption" data-i18n="qrisCaption">Scan QRIS di atas menggunakan aplikasi pembayaran
+                    </div>
                 </div>
 
                 <div class="payment-amount-display">
@@ -1223,7 +3005,8 @@
                 <div class="transaction-note" data-i18n="transNote">📌 Salin kode scrim ini ke admin</div>
 
                 <div class="form-group">
-                    <label><span data-i18n="lblProof">Upload Bukti Transfer</span> <span class="required">*</span></label>
+                    <label><span data-i18n="lblProof">Upload Bukti Transfer</span> <span
+                            class="required">*</span></label>
                     <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
                         <span class="upload-icon">📤</span>
                         <div class="upload-text" data-i18n="uploadText">Klik atau Drag & Drop file di sini</div>
@@ -1241,7 +3024,8 @@
                 <button class="btn btn-green" id="btnWaAdmin" onclick="goToWhatsApp()" data-i18n="btnToWA">
                     Lanjut ke WA Admin 📱
                 </button>
-                <button class="btn btn-secondary" style="margin-top:10px;" onclick="goBackToStep1()" data-i18n="btnBackStep1">
+                <button class="btn btn-secondary" style="margin-top:10px;" onclick="goBackToStep1()"
+                    data-i18n="btnBackStep1">
                     ← Kembali
                 </button>
             </div>
@@ -1260,13 +3044,15 @@
                     <div class="success-row">
                         <span class="success-label" data-i18n="rowCode">Kode Scrim:</span>
                         <div style="display:flex;align-items:center;gap:8px;">
-                            <span id="step3TransactionId" style="font-family:'Courier New',monospace;font-size:1.05rem;font-weight:700;color:var(--gold);letter-spacing:1px;">SCRIM-0000</span>
+                            <span id="step3TransactionId"
+                                style="font-family:'Courier New',monospace;font-size:1.05rem;font-weight:700;color:var(--gold);letter-spacing:1px;">SCRIM-0000</span>
                             <button class="copy-btn" onclick="copyTransactionId()" data-i18n="btnCopy">📋 Copy</button>
                         </div>
                     </div>
                     <div class="success-row">
                         <span class="success-label" data-i18n="rowWAAdmin">Nomor WA Admin:</span>
-                        <span id="step3AdminWa" class="success-val" style="color:var(--text-primary);">+62 881-0811-20205</span>
+                        <span id="step3AdminWa" class="success-val" style="color:var(--text-primary);">+62
+                            851-6623-5006</span>
                     </div>
                 </div>
                 <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:16px;" data-i18n="noteClickWA">
@@ -1285,13 +3071,18 @@
     <script>
         // ==================== KONFIGURASI WEB 2 ====================
         const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyDqmvM05WIth-Lsv0ocsGR8j3fKG1T36nwWr4JpoR4au3UpFpGwOR733KzQwsitMZhTw/exec';
-        const WA_ADMIN_NUMBER = '62881081120205';
+        const WA_ADMIN_NUMBER = '6285166235006';
 
         // ==================== FIREBASE REALTIME DATABASE ====================
         const firebaseConfig = {
+            apiKey: "AIzaSyBp57WGOhmhcCTfQA_kOb3Nh_XZS-9sIww",
             authDomain: "registrasi-5d8e1.firebaseapp.com",
             databaseURL: "https://registrasi-5d8e1-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "registrasi-5d8e1",
             storageBucket: "registrasi-5d8e1.firebasestorage.app",
+            messagingSenderId: "3774493819",
+            appId: "1:3774493819:web:56ded4fef4637095f71ede",
+            measurementId: "G-LDB9SDJWB8"
         };
 
         let rtdb = null;
@@ -1308,16 +3099,16 @@
 
         // ==================== PETA QRIS ====================
         const QRIS_MAP = {
-            5000:   'qris-5000.png',
-            10000:  'qris-10000.png',
-            15000:  'qris-15000.png',
-            20000:  'qris-20000.png',
-            25000:  'qris-25000.png',
-            30000:  'qris-30000.png',
-            35000:  'qris-35000.png',
-            40000:  'qris-40000.png',
-            45000:  'qris-45000.png',
-            50000:  'qris-50000.png',
+            5000: 'qris-5000.png',
+            10000: 'qris-10000.png',
+            15000: 'qris-15000.png',
+            20000: 'qris-20000.png',
+            25000: 'qris-25000.png',
+            30000: 'qris-30000.png',
+            35000: 'qris-35000.png',
+            40000: 'qris-40000.png',
+            45000: 'qris-45000.png',
+            50000: 'qris-50000.png',
         };
         const QRIS_STATIS = 'qris-bebas.png';
         const BATAS_QRIS_DINAMIS = 50000;
@@ -1563,13 +3354,13 @@
             }
 
             const reader = new FileReader();
-            reader.onload = function(evt) {
+            reader.onload = function (evt) {
                 const img = new Image();
-                img.onload = function() {
+                img.onload = function () {
                     const canvas = document.createElement('canvas');
                     let width = img.width;
                     let height = img.height;
-                    const maxDim = 800;
+                    const maxDim = 400;
                     if (width > maxDim || height > maxDim) {
                         if (width > height) {
                             height = Math.round((height * maxDim) / width);
@@ -1584,7 +3375,7 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
 
-                    const compressed = canvas.toDataURL('image/png', 0.92);
+                    const compressed = canvas.toDataURL('image/jpeg', 0.85);
                     state.teamLogoDataUrl = compressed;
                     state.teamLogoFileName = file.name;
 
@@ -1631,13 +3422,13 @@
             state.uploadedFileName = file.name;
 
             const reader = new FileReader();
-            reader.onload = function(evt) {
+            reader.onload = function (evt) {
                 const img = new Image();
-                img.onload = function() {
+                img.onload = function () {
                     const canvas = document.createElement('canvas');
                     let width = img.width;
                     let height = img.height;
-                    const maxDim = 1200;
+                    const maxDim = 800;
                     if (width > maxDim || height > maxDim) {
                         if (width > height) {
                             height = Math.round((height * maxDim) / width);
@@ -1652,7 +3443,7 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
 
-                    const compressed = canvas.toDataURL('image/jpeg', 0.85);
+                    const compressed = canvas.toDataURL('image/jpeg', 0.75);
                     state.uploadedFileDataUrl = compressed;
 
                     previewImage.src = compressed;
@@ -1661,6 +3452,9 @@
                     document.getElementById('uploadArea').style.display = 'none';
                     document.getElementById('uploadArea').classList.remove('error');
                     document.getElementById('uploadError').classList.remove('show');
+                };
+                img.onerror = function () {
+                    alert(state.lang === 'id' ? 'Format gambar tidak terbaca atau rusak. Silakan upload screenshot biasa (JPG/PNG)!' : 'Image format not supported. Please upload a standard JPG/PNG screenshot!');
                 };
                 img.src = evt.target.result;
             };
@@ -1794,7 +3588,7 @@
             state.captainNick = captainNickInput.value.trim();
             state.whatsappNumber = whatsappInput.value.trim();
             state.transactionId = generateTransactionId();
-            
+
             transactionIdDisplay.textContent = state.transactionId;
             const s3Id = document.getElementById('step3TransactionId');
             if (s3Id) s3Id.textContent = state.transactionId;
@@ -1847,20 +3641,41 @@
             });
         }
 
-        // ==================== SUBMIT & WHATSAPP ====================
-        function goToWhatsApp() {
+        // ==================== SUBMIT & WHATSAPP (ASYNC DENGAN INDIKATOR LOADING) ====================
+        async function goToWhatsApp() {
             if (!state.uploadedFileDataUrl) {
                 document.getElementById('uploadArea').classList.add('error');
                 document.getElementById('uploadError').classList.add('show');
                 return;
             }
 
-            sendToSheet();
-            showStep(3);
-            updateStepIndicator(3);
+            const btn = document.getElementById('btnWaAdmin');
+            const originalText = btn.innerHTML;
+
+            // Kunci tombol & tampilkan animasi/teks loading
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳ Menyimpan Data & Bukti... Mohon Tunggu</span>';
+
+            try {
+                // Tunggu hingga request pengiriman data tuntas
+                await sendToSheet();
+                showStep(3);
+                updateStepIndicator(3);
+            } catch (err) {
+                console.error('Gagal kirim sheet:', err);
+                alert(state.lang === 'id'
+                    ? 'Terjadi kendala jaringan saat mengirim ke Spreadsheet. Jangan khawatir, Anda tetap bisa lanjut konfirmasi langsung ke WhatsApp Admin!'
+                    : 'Network error sending to Spreadsheet. You can still confirm directly via WhatsApp!');
+                // Tetap bawa ke Step 3 agar pendaftar bisa chat WA jika sinyal darurat
+                showStep(3);
+                updateStepIndicator(3);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
         }
 
-        function sendToSheet() {
+        async function sendToSheet() {
             if (!GOOGLE_SCRIPT_URL) return;
 
             const payload = {
@@ -1876,23 +3691,35 @@
                 status: 'Menunggu Konfirmasi'
             };
 
-            fetch(GOOGLE_SCRIPT_URL, {
-                method: 'POST', mode: 'no-cors',
-                headers: { 'Content-Type': 'text/plain' },
-                body: JSON.stringify(payload)
-            }).catch(err => console.error('Gagal kirim sheet:', err));
+            // Berikan batas waktu maksimal 15 detik untuk koneksi
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            try {
+                await fetch(GOOGLE_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify(payload),
+                    signal: controller.signal
+                });
+            } finally {
+                clearTimeout(timeoutId);
+            }
         }
 
-                function buildWhatsAppMessage() {
-            const sessions = state.selectedSessions.map(s =>
-                `- ${s.time} ${s.type === 'daily' ? 'DAILY SCRIM' : 'NIGHT SCRIM'}`
-            ).join('\n');
-            return `Kode Scrim: ${state.transactionId}\n` +
-                `Nama Tim: ${state.teamName}\n` +
-                `Nick Kapten: ${state.captainNick}\n` +
-                `No WhatsApp: ${state.whatsappNumber}\n` +
-                `Sesi yang dipilih:\n${sessions}\n\n` +
-                `Total Pembayaran: Rp ${state.totalPrice.toLocaleString('id-ID')}`;
+        function buildWhatsAppMessage() {
+            const sessionsStr = state.selectedSessions.map(s => `${s.time} ${s.type === 'daily' ? 'DAILY SCRIM' : 'NIGHT SCRIM'}`).join(', ');
+            return `Halo Admin Papih Gaming, saya mau konfirmasi registrasi scrim:
+
+📌 *KODE SCRIM:* ${state.transactionId}
+🛡️ *Nama Tim:* ${state.teamName}
+👤 *Nick Kapten:* ${state.captainNick}
+📱 *No WhatsApp:* ${state.whatsappNumber}
+⏰ *Sesi Dipilih:* ${sessionsStr}
+💰 *Total Bayar:* Rp ${state.totalPrice.toLocaleString('id-ID')}
+
+✅ Bukti transfer & logo tim sudah saya lampirkan melalui website. Mohon dicek. Terima kasih!`;
         }
 
         function openWhatsApp() {
@@ -1990,4 +3817,5 @@
         });
     </script>
 </body>
+
 </html>
