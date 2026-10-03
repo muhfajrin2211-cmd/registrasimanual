@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="id" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +11,9 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700;800&family=Segoe+UI:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700;800&family=Segoe+UI:wght@400;600;700;800&display=swap"
+        rel="stylesheet">
     <style>
         :root {
             /* DARK THEME (PERSIS ADMIN WEB 1) */
@@ -68,7 +71,11 @@
                 radial-gradient(ellipse at 50% 50%, rgba(217, 119, 6, 0.02) 0%, transparent 60%);
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -102,7 +109,10 @@
         }
 
         /* Language Globe Dropdown */
-        .lang-dropdown-wrapper { position: relative; }
+        .lang-dropdown-wrapper {
+            position: relative;
+        }
+
         .lang-globe-btn {
             background: var(--bg-card);
             border: 1.5px solid var(--border-color);
@@ -117,7 +127,11 @@
             align-items: center;
             gap: 6px;
         }
-        .lang-globe-btn:hover { border-color: var(--accent); }
+
+        .lang-globe-btn:hover {
+            border-color: var(--accent);
+        }
+
         .lang-menu {
             position: absolute;
             top: calc(100% + 8px);
@@ -134,7 +148,11 @@
             z-index: 1000;
             backdrop-filter: blur(12px);
         }
-        .lang-menu.show { display: flex; }
+
+        .lang-menu.show {
+            display: flex;
+        }
+
         .lang-item {
             display: flex;
             align-items: center;
@@ -147,8 +165,17 @@
             cursor: pointer;
             transition: all var(--transition);
         }
-        .lang-item:hover { background: rgba(255, 51, 75, 0.12); color: var(--accent); }
-        .lang-item.active { background: var(--accent); color: #fff; font-weight: 700; }
+
+        .lang-item:hover {
+            background: rgba(255, 51, 75, 0.12);
+            color: var(--accent);
+        }
+
+        .lang-item.active {
+            background: var(--accent);
+            color: #fff;
+            font-weight: 700;
+        }
 
         /* Theme Toggle */
         .theme-toggle-btn {
@@ -165,7 +192,11 @@
             cursor: pointer;
             transition: all var(--transition);
         }
-        .theme-toggle-btn:hover { border-color: var(--accent); transform: rotate(15deg); }
+
+        .theme-toggle-btn:hover {
+            border-color: var(--accent);
+            transform: rotate(15deg);
+        }
 
         /* LOGO */
         .panel-logo {
@@ -269,7 +300,10 @@
             filter: brightness(1.1);
         }
 
-        .btn-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-submit:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
 
         .alert-box {
             background: rgba(239, 68, 68, 0.12);
@@ -282,7 +316,11 @@
             display: none;
             text-align: left;
         }
-        .alert-box.show { display: block; animation: shake 0.3s ease; }
+
+        .alert-box.show {
+            display: block;
+            animation: shake 0.3s ease;
+        }
 
         /* DASHBOARD SECTION (PERSIS WEB 1) */
         .dashboard-wrapper {
@@ -366,7 +404,11 @@
             align-items: center;
             gap: 6px;
         }
-        .btn-action-ghost:hover { border-color: var(--text-primary); color: var(--text-primary); }
+
+        .btn-action-ghost:hover {
+            border-color: var(--text-primary);
+            color: var(--text-primary);
+        }
 
         .btn-logout {
             background: rgba(239, 68, 68, 0.15);
@@ -379,7 +421,11 @@
             cursor: pointer;
             transition: all var(--transition);
         }
-        .btn-logout:hover { background: var(--error); color: #fff; }
+
+        .btn-logout:hover {
+            background: var(--error);
+            color: #fff;
+        }
 
         /* STATS BAR */
         .stats-bar {
@@ -413,9 +459,17 @@
             font-weight: 700;
         }
 
-        .stat-card.active-stat .val { color: var(--success); }
-        .stat-card.full-stat .val { color: var(--gold); }
-        .stat-card.hidden-stat .val { color: var(--error); }
+        .stat-card.active-stat .val {
+            color: var(--success);
+        }
+
+        .stat-card.full-stat .val {
+            color: var(--gold);
+        }
+
+        .stat-card.hidden-stat .val {
+            color: var(--error);
+        }
 
         /* SESSION GRID */
         .sessions-list-grid {
@@ -436,7 +490,9 @@
             transition: all var(--transition);
         }
 
-        .session-ctrl-card:hover { border-color: var(--border-highlight); }
+        .session-ctrl-card:hover {
+            border-color: var(--border-highlight);
+        }
 
         .session-ctrl-card.state-hidden {
             opacity: 0.45;
@@ -464,8 +520,18 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .tag-pill.daily { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
-        .tag-pill.night { background: rgba(251, 191, 36, 0.15); color: var(--gold); border: 1px solid rgba(251, 191, 36, 0.3); }
+
+        .tag-pill.daily {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+
+        .tag-pill.night {
+            background: rgba(251, 191, 36, 0.15);
+            color: var(--gold);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+        }
 
         .toggles-group {
             display: flex;
@@ -492,9 +558,17 @@
             accent-color: var(--accent);
         }
 
-        .toggle-item.hide-opt { color: var(--error); }
-        .toggle-item.full-opt { color: var(--gold); }
-        .toggle-item.full-opt input { accent-color: var(--gold); }
+        .toggle-item.hide-opt {
+            color: var(--error);
+        }
+
+        .toggle-item.full-opt {
+            color: var(--gold);
+        }
+
+        .toggle-item.full-opt input {
+            accent-color: var(--gold);
+        }
 
         /* SAVE BAR (PERSIS WEB 1) */
         .save-bar {
@@ -542,28 +616,87 @@
             font-size: 0.9rem;
             font-weight: 700;
             z-index: 9999;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             transform: translateY(-50px);
             opacity: 0;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             pointer-events: none;
         }
-        .toast.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
-        .toast.success { background: #064e3b; border: 1px solid #10b981; color: #6ee7b7; }
-        .toast.error { background: #7f1d1d; border: 1px solid #ef4444; color: #fca5a5; }
 
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .toast.success {
+            background: #064e3b;
+            border: 1px solid #10b981;
+            color: #6ee7b7;
+        }
+
+        .toast.error {
+            background: #7f1d1d;
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            20%,
+            60% {
+                transform: translateX(-6px);
+            }
+
+            40%,
+            80% {
+                transform: translateX(6px);
+            }
+        }
 
         @media (max-width: 768px) {
-            .sessions-list-grid { grid-template-columns: 1fr; }
-            .stats-bar { grid-template-columns: repeat(2, 1fr); }
-            .dash-topbar { flex-direction: column; align-items: flex-start; }
-            .save-bar { flex-direction: column; gap: 12px; }
-            .btn-save-database { width: 100%; }
+            .sessions-list-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats-bar {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .dash-topbar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .save-bar {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .btn-save-database {
+                width: 100%;
+            }
         }
     </style>
 </head>
+
 <body>
 
     <div id="toast" class="toast"></div>
@@ -574,7 +707,8 @@
             <!-- Globe Language Dropdown -->
             <div class="lang-dropdown-wrapper" id="langDropdownWrapper">
                 <button type="button" class="lang-globe-btn" id="langGlobeBtn" onclick="toggleLangDropdown()">
-                    <span>🌐</span> <span id="currentLangLabel">ID</span> <span style="font-size:0.6rem; opacity:0.7;">▼</span>
+                    <span>🌐</span> <span id="currentLangLabel">ID</span> <span
+                        style="font-size:0.6rem; opacity:0.7;">▼</span>
                 </button>
                 <div class="lang-menu" id="langMenu">
                     <div class="lang-item active" data-lang="id" onclick="selectLang('id')">🇮🇩 Indonesia</div>
@@ -588,7 +722,8 @@
             </div>
 
             <!-- Dark / Light Mode Toggle -->
-            <button type="button" class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Ganti Tema">
+            <button type="button" class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()"
+                title="Ganti Tema">
                 🌙
             </button>
         </div>
@@ -604,17 +739,20 @@
             <form id="loginForm" onsubmit="handleLogin(event)">
                 <div class="input-group">
                     <label data-i18n="lblEmail">Email Admin</label>
-                    <input type="email" id="loginEmail" class="admin-input" placeholder="Masukkan email admin..." required autocomplete="username" />
+                    <input type="email" id="loginEmail" class="admin-input" placeholder="Masukkan email admin..."
+                        required autocomplete="username" />
                 </div>
                 <div class="input-group">
                     <label data-i18n="lblPass">Password</label>
-                    <input type="password" id="loginPassword" class="admin-input" placeholder="Masukkan password..." required autocomplete="current-password" />
+                    <input type="password" id="loginPassword" class="admin-input" placeholder="Masukkan password..."
+                        required autocomplete="current-password" />
                 </div>
                 <button type="submit" class="btn-submit" id="btnLogin" data-i18n="btnEnter">Masuk ke Panel</button>
             </form>
 
             <div style="margin-top:20px;">
-                <a href="index.html" class="btn-action-ghost" style="display:inline-flex;font-size:0.8rem;" data-i18n="btnBackWeb">
+                <a href="index.html" class="btn-action-ghost" style="display:inline-flex;font-size:0.8rem;"
+                    data-i18n="btnBackWeb">
                     ← Kembali ke Halaman Registrasi
                 </a>
             </div>
@@ -629,13 +767,15 @@
                         <h1 data-i18n="dashHeading">KELOLA SESI SCRIM</h1>
                         <div class="user-status">
                             <span class="online-dot"></span>
-                            <span id="userEmailDisplay">admin</span> • <span style="color:var(--success);font-weight:700;">Admin Terverifikasi</span>
+                            <span id="userEmailDisplay">admin</span> • <span
+                                style="color:var(--success);font-weight:700;">Admin Terverifikasi</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="dash-actions">
-                    <a href="index.html" target="_blank" class="btn-action-ghost" title="Buka website yang dilihat peserta">
+                    <a href="index.html" target="_blank" class="btn-action-ghost"
+                        title="Buka website yang dilihat peserta">
                         👁️ <span data-i18n="btnViewParticipant">Lihat Web Peserta</span>
                     </a>
                     <button class="btn-logout" onclick="handleLogout()" data-i18n="btnLogout">🚪 Keluar</button>
@@ -663,15 +803,19 @@
             </div>
 
             <!-- BULK ACTIONS -->
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
-                <span style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase;" data-i18n="lblControlList">
+            <div
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+                <span style="font-size:0.85rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase;"
+                    data-i18n="lblControlList">
                     Daftar Kontrol Sesi
                 </span>
                 <div style="display:flex; gap:8px;">
-                    <button class="btn-action-ghost" style="font-size:0.75rem; padding:6px 12px;" onclick="resetAllStates()" data-i18n="btnOpenAll">
+                    <button class="btn-action-ghost" style="font-size:0.75rem; padding:6px 12px;"
+                        onclick="resetAllStates()" data-i18n="btnOpenAll">
                         🔓 Buka Semua Sesi
                     </button>
-                    <button class="btn-action-ghost" style="font-size:0.75rem; padding:6px 12px;" onclick="markAllFull()" data-i18n="btnMarkAllFull">
+                    <button class="btn-action-ghost" style="font-size:0.75rem; padding:6px 12px;"
+                        onclick="markAllFull()" data-i18n="btnMarkAllFull">
                         🔒 Tandai Semua Full
                     </button>
                 </div>
@@ -685,7 +829,8 @@
             <!-- SAVE BAR -->
             <div class="save-bar">
                 <div>
-                    <span id="syncIndicator" style="font-size:0.88rem; color:var(--text-secondary);">⚡ Terkoneksi Realtime ke Firebase V2</span>
+                    <span id="syncIndicator" style="font-size:0.88rem; color:var(--text-secondary);">⚡ Terkoneksi
+                        Realtime ke Firebase V2</span>
                 </div>
                 <button class="btn-save-database" id="btnSaveDb" onclick="saveToDatabase()" data-i18n="btnSaveDb">
                     💾 Simpan Perubahan
@@ -697,15 +842,15 @@
 
     <script>
         const firebaseConfig = {
-    apiKey: "AIzaSyBp57WGOhmhcCTfQA_kOb3Nh_XZS-9sIww",
-    authDomain: "registrasi-5d8e1.firebaseapp.com",
-    databaseURL: "https://registrasi-5d8e1-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "registrasi-5d8e1",
-    storageBucket: "registrasi-5d8e1.firebasestorage.app",
-    messagingSenderId: "3774493819",
-    appId: "1:3774493819:web:56ded4fef4637095f71ede",
-    measurementId: "G-LDB9SDJWB8"
-};
+            apiKey: "AIzaSyBp57WGOhmhcCTfQA_kOb3Nh_XZS-9sIww",
+            authDomain: "registrasi-5d8e1.firebaseapp.com",
+            databaseURL: "https://registrasi-5d8e1-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "registrasi-5d8e1",
+            storageBucket: "registrasi-5d8e1.firebasestorage.app",
+            messagingSenderId: "3774493819",
+            appId: "1:3774493819:web:56ded4fef4637095f71ede",
+            measurementId: "G-LDB9SDJWB8"
+        };
 
         if (!firebase.apps.length) {
             firebase.initializeApp(firebaseConfig);
@@ -864,7 +1009,7 @@
             }
         });
 
-                function handleLogin(e) {
+        function handleLogin(e) {
             e.preventDefault();
             const email = document.getElementById('loginEmail').value.trim();
             const password = document.getElementById('loginPassword').value;
@@ -877,7 +1022,7 @@
 
             auth.signInWithEmailAndPassword(email, password)
                 .then(() => {
-                    // Berhasil login - onAuthStateChanged akan langsung membuka dashboard
+                    // Berhasil login - onAuthStateChanged akan otomatis mengalihkan ke dashboard
                 })
                 .catch((err) => {
                     console.error('Firebase Auth Error:', err);
@@ -1017,12 +1162,12 @@
                 hidden: currentHidden,
                 full: currentFull,
                 updatedAt: new Date().toISOString()
-                      }).then(() => {
-                showToast((adminTranslations[currentLang] && adminTranslations[currentLang].toastSaved) || '✅ Berhasil disimpan ke V2!', 'success');
+            }).then(() => {
+                showToast(adminTranslations[currentLang].toastSaved || '✅ Berhasil disimpan ke V2!', 'success');
                 btn.disabled = false;
                 btn.textContent = origText;
             }).catch((err) => {
-                showToast('❌ Gagal: ' + (err.message || err), 'error');
+                showToast('❌ Gagal: ' + err.message, 'error');
                 btn.disabled = false;
                 btn.textContent = origText;
             });
@@ -1043,4 +1188,5 @@
         });
     </script>
 </body>
+
 </html>
