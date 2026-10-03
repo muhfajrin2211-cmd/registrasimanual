@@ -2152,6 +2152,11 @@ function bersihkanSesiSepuluh() {
             border-color: var(--error);
         }
 
+        /* Sesi HIDDEN */
+        .session-time-item.hidden {
+            display: none !important;
+        }
+
         .info-note {
             background: rgba(255, 215, 0, 0.08);
             border: 1px solid rgba(255, 215, 0, 0.3);
@@ -2751,16 +2756,16 @@ function bersihkanSesiSepuluh() {
             }
 
             .session-time-item {
-                display: grid !important;
-                grid-template-columns: 18px 1fr auto !important;
-                grid-template-rows: auto auto !important;
-                align-items: center !important;
-                padding: 8px 9px !important;
-                gap: 2px 6px !important;
-                box-sizing: border-box !important;
-                min-width: 0 !important;
-                width: 100% !important;
-                overflow: hidden !important;
+                display: grid;
+                grid-template-columns: 18px 1fr auto;
+                grid-template-rows: auto auto;
+                align-items: center;
+                padding: 8px 9px;
+                gap: 2px 6px;
+                box-sizing: border-box;
+                min-width: 0;
+                width: 100%;
+                overflow: hidden;
             }
 
             .session-time-item .check-icon {
@@ -3569,7 +3574,7 @@ function bersihkanSesiSepuluh() {
         // ==================== SESI SELECTION ====================
         document.querySelectorAll('.session-time-item').forEach(item => {
             item.addEventListener('click', () => {
-                if (item.classList.contains('full')) return;
+                if (item.classList.contains('full') || item.classList.contains('hidden') || isAllSlotsFull) return;
 
                 const time = item.dataset.time;
                 const type = item.dataset.type;
@@ -3979,11 +3984,13 @@ async function sendToSheet(logoUrl, buktiUrl) {
                     const isFull = full.some(f => f.time === time && f.type === type);
 
                     if (isHidden) {
-                        el.style.display = 'none';
+                        el.classList.add('hidden');
+                        el.style.setProperty('display', 'none', 'important');
                         el.classList.remove('selected', 'full');
                         state.selectedSessions = state.selectedSessions.filter(s => !(s.time === time && s.type === type));
                     } else {
                         visibleCount++;
+                        el.classList.remove('hidden');
                         el.style.display = '';
                         if (isFull) {
                             fullVisibleCount++;
