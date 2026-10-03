@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/upload",
+      "destination": "http://202.155.157.250/uploads/upload.php"
+    }
+  ]
+}
